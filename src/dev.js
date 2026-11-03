@@ -84,8 +84,13 @@ export function injectDevClient(html) {
   });
 })();
 </script>`;
-  if (/<\/body\s*>/i.test(html))
-    return html.replace(/<\/body\s*>/i, `${script}\n</body>`);
+  // Insert before the *last* closing body tag: packaged pages inline a bundle
+  // that can itself contain the literal text `</body>` inside a string, and
+  // injecting there would corrupt the script instead of ending the document.
+  let bodyEnd = -1;
+  for (const match of html.matchAll(/<\/body\s*>/gi)) bodyEnd = match.index;
+  if (bodyEnd !== -1)
+    return `${html.slice(0, bodyEnd)}${script}\n${html.slice(bodyEnd)}`;
   return `${html}${html.endsWith("\n") ? "" : "\n"}${script}`;
 }
 

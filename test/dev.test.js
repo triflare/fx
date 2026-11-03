@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startDevServer } from "../src/dev.js";
+import { injectDevClient, startDevServer } from "../src/dev.js";
 
 const silent = { error() {}, success() {}, warn() {}, info() {} };
 
@@ -118,6 +118,18 @@ test("dev server reloads only when the built HTML changes", async () => {
     await server.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("dev client is injected before the last closing body tag", () => {
+  // Packaged pages inline a bundle whose strings can contain "</body>".
+  const html =
+    '<html><body>\n<script>const tpl = "</body>";</script>\n<h1>hi</h1>\n</body>\n</html>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("<h1>hi</h1>"));
+  assert.ok(out.includes('<script>const tpl = "</body>";</script>'));
+  assert.equal(out.match(/<\/body>/g).length, 2);
+  assert.ok(out.trimEnd().endsWith("</html>"));
+  assert.equal(injectDevClient(out), out);
 });
 
 test("dev server picks the next free port unless strict", async () => {
