@@ -25,6 +25,14 @@ export const DEFAULT_PROJECT = {
   unsandboxed: [],
 };
 
+/**
+ * Fx-only settings that never reach PenguinMod's project runtime config.
+ * Kept in a separate top-level `fx:` block in fx.yml.
+ */
+export const DEFAULT_FX = {
+  partialSprites: false,
+};
+
 /** PenguinMod's stage-comment magic string (unchanged on disk). */
 export const CONFIG_MAGIC = " // _twconfig_";
 
@@ -65,17 +73,36 @@ export function normalizeProject(raw = {}) {
 }
 
 /**
+ * @param {object} raw parsed YAML `fx` mapping
+ * @returns {typeof DEFAULT_FX}
+ */
+export function normalizeFx(raw = {}) {
+  const fx = { ...DEFAULT_FX };
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    if (raw.partialSprites != null)
+      fx.partialSprites = Boolean(raw.partialSprites);
+  }
+  return fx;
+}
+
+/**
  * Parse a YAML config string.
  * @param {string} text
- * @returns {{project: typeof DEFAULT_PROJECT, raw: object}}
+ * @returns {{project: typeof DEFAULT_PROJECT, fx: typeof DEFAULT_FX, raw: object}}
  */
 export function parseConfig(text) {
   const raw = yaml.load(text) || {};
-  if (typeof raw !== "object")
+  if (typeof raw !== "object" || Array.isArray(raw))
     throw new Error(
       `${configFilename()} must contain a mapping at the top level`,
     );
-  return { project: normalizeProject(raw.project || {}), raw };
+  if (raw.fx != null && (typeof raw.fx !== "object" || Array.isArray(raw.fx)))
+    throw new Error(`${configFilename()} must contain an "fx" mapping`);
+  return {
+    project: normalizeProject(raw.project || {}),
+    fx: normalizeFx(raw.fx || {}),
+    raw,
+  };
 }
 
 /**
@@ -102,15 +129,20 @@ export function findConfigPath(dir) {
  * Find and load `fx.yml`/`fx.yaml` from a directory (or any of
  * its ancestors).
  * @param {string} dir
- * @returns {{project: typeof DEFAULT_PROJECT, raw: object, path: string|null}}
+ * @returns {{project: typeof DEFAULT_PROJECT, fx: typeof DEFAULT_FX, raw: object, path: string|null}}
  */
 export function loadConfigFrom(dir) {
   const found = findConfigPath(dir);
   if (found) {
-    const { project, raw } = parseConfig(fs.readFileSync(found, "utf8"));
-    return { project, raw, path: found };
+    const { project, fx, raw } = parseConfig(fs.readFileSync(found, "utf8"));
+    return { project, fx, raw, path: found };
   }
-  return { project: { ...DEFAULT_PROJECT }, raw: {}, path: null };
+  return {
+    project: { ...DEFAULT_PROJECT },
+    fx: { ...DEFAULT_FX },
+    raw: {},
+    path: null,
+  };
 }
 
 /**

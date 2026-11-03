@@ -10,7 +10,9 @@ import {
   configComment,
   findConfigPath,
   loadConfigFrom,
+  normalizeFx,
   DEFAULT_PROJECT,
+  DEFAULT_FX,
   CONFIG_MAGIC,
 } from "../src/config.js";
 
@@ -37,6 +39,27 @@ project:
     "https://extensions.penguinmod.com/some/text.js",
   ]);
   assert.deepEqual(project.unsandboxed, ["signals"]);
+});
+
+test("reads Fx-only settings from their own top-level mapping", () => {
+  const { project, fx } = parseConfig(`
+project:
+  name: "Fragments"
+fx:
+  partialSprites: true
+`);
+  assert.equal(project.name, "Fragments");
+  assert.equal(fx.partialSprites, true);
+  assert.equal(DEFAULT_FX.partialSprites, false);
+  assert.equal(normalizeFx({}).partialSprites, false);
+  assert.equal(normalizeFx({ partialSprites: "yes" }).partialSprites, true);
+});
+
+test("rejects a non-mapping fx section", () => {
+  assert.throws(
+    () => parseConfig("fx: true\n"),
+    /must contain an "fx" mapping/,
+  );
 });
 
 test("normalizes a single unsandboxed extension to a list", () => {

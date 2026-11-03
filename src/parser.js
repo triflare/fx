@@ -99,7 +99,15 @@ class Parser {
     const topItems = [];
 
     while (this.peek().type !== "eof") {
-      if (this.atIdent("sprite") && this.peek(1).type === "string") {
+      if (
+        this.atIdent("partial") &&
+        this.peek(1).type === "ident" &&
+        this.peek(1).value === "sprite" &&
+        this.peek(2).type === "string"
+      ) {
+        const tok = this.next();
+        sprites.push(this.parseSprite(true, tok));
+      } else if (this.atIdent("sprite") && this.peek(1).type === "string") {
         sprites.push(this.parseSprite());
       } else if (
         this.atIdent("stage") &&
@@ -116,11 +124,11 @@ class Parser {
     return { type: "Program", stage, sprites, topItems };
   }
 
-  parseSprite() {
+  parseSprite(partial = false, startTok = null) {
     const tok = this.expect("sprite");
     const name = this.expectType("string", "a sprite name string").value;
     const body = this.parseBlockBody();
-    return { type: "SpriteDecl", name, body, loc: tok };
+    return { type: "SpriteDecl", name, body, loc: startTok ?? tok, partial };
   }
 
   parseStage() {

@@ -96,6 +96,162 @@ test("mergePrograms rejects duplicate sprite names", () => {
   );
 });
 
+test("mergePrograms merges partial sprite fragments base-first", () => {
+  const scripts = parse(
+    'partial sprite "Cat" { when greenFlag { looks.show(); } }',
+    "scripts.tfx",
+  );
+  const base = parse('sprite "Cat" { let lives = 0; }', "base.tfx");
+  const state = parse('partial sprite "Cat" { let score = 1; }', "state.tfx");
+
+  const ast = mergePrograms(
+    [
+      { ast: scripts, file: "scripts.tfx" },
+      { ast: base, file: "base.tfx" },
+      { ast: state, file: "state.tfx" },
+    ],
+    { partialSprites: true },
+  );
+
+  assert.equal(ast.sprites.length, 1);
+  assert.equal(ast.sprites[0].name, "Cat");
+  assert.equal(ast.sprites[0].partial, false);
+  assert.deepEqual(
+    ast.sprites[0].body.map((item) => item.type),
+    ["VarDecl", "HatDecl", "VarDecl"],
+  );
+  assert.equal(ast.sprites[0].body[0].name, "lives");
+  assert.deepEqual(ast.sprites[0].files, [
+    "scripts.tfx",
+    "base.tfx",
+    "state.tfx",
+  ]);
+});
+
+test("mergePrograms supports sprites made only of partial fragments", () => {
+  const a = parse(
+    'partial sprite "Cat" { when greenFlag { looks.show(); } }',
+    "a.tfx",
+  );
+  const b = parse('partial sprite "Cat" { let lives = 9; }', "b.tfx");
+  const ast = mergePrograms(
+    [
+      { ast: a, file: "a.tfx" },
+      { ast: b, file: "b.tfx" },
+    ],
+    { partialSprites: true },
+  );
+  assert.equal(ast.sprites.length, 1);
+  assert.equal(ast.sprites[0].body.length, 2);
+  assert.equal(ast.sprites[0].files.length, 2);
+});
+
+test("mergePrograms rejects partial sprites unless fx.partialSprites is on", () => {
+  const ast = parse(
+    'partial sprite "Cat" { when greenFlag { looks.show(); } }',
+    "fragment.tfx",
+  );
+  assert.throws(
+    () => mergePrograms([{ ast, file: "fragment.tfx" }]),
+    (err) => {
+      assert.ok(err instanceof ParseError);
+      assert.match(err.message, /partial sprite "Cat" is disabled/);
+      assert.match(err.message, /fx\.partialSprites: true/);
+      assert.match(err.file, /fragment\.tfx$/);
+      return true;
+    },
+  );
+});
+
+test("duplicate plain sprites still fail and suggest a partial fragment", () => {
+  const a = parse('sprite "Cat" {}', "a.tfx");
+  const b = parse('sprite "Cat" {}', "b.tfx");
+  assert.throws(
+    () =>
+      mergePrograms(
+        [
+          { ast: a, file: "a.tfx" },
+          { ast: b, file: "b.tfx" },
+        ],
+        { partialSprites: true },
+      ),
+    (err) => {
+      assert.ok(err instanceof ParseError);
+      assert.match(err.message, /Duplicate sprite/);
+      assert.match(err.message, /partial sprite "Cat"/);
+      return true;
+    },
+  );
+});
+
+test("build merges sprite fragments when fx.partialSprites is enabled", () => {
+  const dir = tmp();
+  write(path.join(dir, "fx.yml"), "fx:\n  partialSprites: true\n");
+  // The fragment sorts before the base, proving base-first body composition.
+  write(
+    path.join(dir, "a-scripts.tfx"),
+    'partial sprite "Cat" { let b = 2; when greenFlag { looks.say(b); } }',
+  );
+  write(
+    path.join(dir, "z-base.tfx"),
+    'sprite "Cat" { let a = 1; when greenFlag { looks.show(); } }',
+  );
+
+  const result = build({ dir });
+  assert.equal(result.fx.partialSprites, true);
+  const cat = result.project.targets.find((target) => target.name === "Cat");
+  assert.deepEqual(
+    Object.values(cat.variables).map(([name]) => name),
+    ["a", "b"],
+  );
+  assert.equal(
+    Object.values(cat.blocks).filter((block) => block.opcode === "looks_show")
+      .length,
+    1,
+  );
+  assert.equal(
+    Object.values(cat.blocks).filter((block) => block.opcode === "looks_say")
+      .length,
+    1,
+  );
+});
+
+test("build rejects sprite fragments when fx.partialSprites is off", () => {
+  const dir = tmp();
+  write(
+    path.join(dir, "main.tfx"),
+    'partial sprite "Cat" { when greenFlag { looks.show(); } }',
+  );
+  assert.throws(
+    () => build({ dir }),
+    (err) => {
+      assert.ok(err instanceof ParseError);
+      assert.match(err.message, /partialSprites/);
+      return true;
+    },
+  );
+});
+
+test("duplicate sprite locals across fragments point at both files", () => {
+  const dir = tmp();
+  write(path.join(dir, "fx.yml"), "fx:\n  partialSprites: true\n");
+  write(path.join(dir, "base.tfx"), 'sprite "Cat" { let score = 0; }');
+  write(
+    path.join(dir, "fragment.tfx"),
+    'partial sprite "Cat" { let score = 1; }',
+  );
+  assert.throws(
+    () => build({ dir }),
+    (err) => {
+      assert.ok(err instanceof CompileError);
+      assert.match(err.message, /Duplicate variable "score"/);
+      assert.match(err.message, /already declared in .*base\.tfx:1/);
+      assert.match(err.file, /fragment\.tfx$/);
+      return true;
+    },
+  );
+});
+
 test("build compiles every .tfx file in a directory into one project", () => {
   const dir = tmp();
   write(path.join(dir, "fx.yml"), 'project:\n  name: "Merged"\n');

@@ -7,7 +7,7 @@ import { parse } from "./parser.js";
 import { mergePrograms, discoverSources } from "./project.js";
 import { Compiler } from "./compiler.js";
 import { zipSync } from "./sb3.js";
-import { loadConfigFrom, DEFAULT_PROJECT } from "./config.js";
+import { loadConfigFrom, DEFAULT_PROJECT, DEFAULT_FX } from "./config.js";
 import { sourceExtension } from "./brand.js";
 
 /**
@@ -18,6 +18,7 @@ import { sourceExtension } from "./brand.js";
  * @property {Array<{file: string, source: string}>} [sources] Pre-read sources.
  * @property {string} [dir] Directory to scan for `.tfx` files when no input is given.
  * @property {object} [projectConfig] Explicit project config (overrides fx.yml).
+ * @property {object} [fxConfig] Explicit Fx-only config (overrides fx.yml).
  * @property {string} [configDir] Directory to start the fx.yml search from.
  * @property {Record<string, object>} [catalog] Extra catalog entries.
  * @property {Record<string, string>} [extensionUrls] Extension id -> URL map.
@@ -97,7 +98,7 @@ function resolveSources(options) {
 
 /**
  * @param {BuildOptions} [options]
- * @returns {{project: object, assets: Map<string, Buffer>, sb3: Buffer, config: object, ast: object, files: string[]}}
+ * @returns {{project: object, assets: Map<string, Buffer>, sb3: Buffer, config: object, fx: object, ast: object, files: string[]}}
  */
 export function build(options = {}) {
   const { dir, entries } = resolveSources(options);
@@ -105,19 +106,24 @@ export function build(options = {}) {
     throw new Error("No Triflare Fx sources to compile");
 
   let projectConfig = options.projectConfig || null;
+  let fxConfig = options.fxConfig || null;
   let configPath = null;
   if (!projectConfig && options.useConfigFile !== false) {
     const loaded = loadConfigFrom(options.configDir || dir);
     projectConfig = loaded.project;
+    fxConfig = loaded.fx;
     configPath = loaded.path;
   }
   if (!projectConfig) projectConfig = { ...DEFAULT_PROJECT };
+  if (!fxConfig) fxConfig = { ...DEFAULT_FX };
 
   const asts = entries.map(({ file, source }) => ({
     ast: parse(source, file),
     file,
   }));
-  const ast = mergePrograms(asts);
+  const ast = mergePrograms(asts, {
+    partialSprites: fxConfig.partialSprites,
+  });
 
   // Assets are resolved relative to the file that references them, falling
   // back to the config directory (or the scanned directory) for inline
@@ -146,6 +152,7 @@ export function build(options = {}) {
     assets,
     sb3,
     config: projectConfig,
+    fx: fxConfig,
     ast,
     files: entries.map((e) => e.file),
   };

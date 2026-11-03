@@ -171,6 +171,12 @@ export class Compiler {
     });
   }
 
+  /** Human-readable source location for a duplicate declaration. */
+  where(loc) {
+    if (!loc || !loc.file) return null;
+    return loc.line != null ? `${loc.file}:${loc.line}` : loc.file;
+  }
+
   newVarId() {
     return `v${(++this.varCounter).toString(36)}`;
   }
@@ -324,14 +330,20 @@ export class Compiler {
   declareTargetVar(ctx, decl) {
     const global = ctx.isStage;
     if (global && this.globals.has(decl.name)) {
+      const first = this.globals.get(decl.name);
+      const where = this.where(first.loc);
       this.fail(
-        `Duplicate global variable ${JSON.stringify(decl.name)}`,
+        `Duplicate global variable ${JSON.stringify(decl.name)}` +
+          (where ? ` (already declared in ${where})` : ""),
         decl.loc,
       );
     }
     if (!global && ctx.vars.has(decl.name)) {
+      const first = ctx.vars.get(decl.name);
+      const where = this.where(first.loc);
       this.fail(
-        `Duplicate variable ${JSON.stringify(decl.name)} in ${ctx.targetName}`,
+        `Duplicate variable ${JSON.stringify(decl.name)} in ${ctx.targetName}` +
+          (where ? ` (already declared in ${where})` : ""),
         decl.loc,
       );
     }
@@ -343,6 +355,7 @@ export class Compiler {
       name: decl.name,
       cloud: !!decl.cloud,
       value,
+      loc: decl.loc,
     };
     if (global) {
       this.globals.set(decl.name, info);
@@ -361,14 +374,20 @@ export class Compiler {
 
   declareTargetList(ctx, decl) {
     if (ctx.isStage && this.globals.has(decl.name)) {
+      const first = this.globals.get(decl.name);
+      const where = this.where(first.loc);
       this.fail(
-        `Duplicate global variable ${JSON.stringify(decl.name)}`,
+        `Duplicate global variable ${JSON.stringify(decl.name)}` +
+          (where ? ` (already declared in ${where})` : ""),
         decl.loc,
       );
     }
     if (!ctx.isStage && ctx.lists.has(decl.name)) {
+      const first = ctx.lists.get(decl.name);
+      const where = this.where(first.loc);
       this.fail(
-        `Duplicate list ${JSON.stringify(decl.name)} in ${ctx.targetName}`,
+        `Duplicate list ${JSON.stringify(decl.name)} in ${ctx.targetName}` +
+          (where ? ` (already declared in ${where})` : ""),
         decl.loc,
       );
     }
@@ -378,6 +397,7 @@ export class Compiler {
       id: this.newVarId(),
       name: decl.name,
       value: items,
+      loc: decl.loc,
     };
     if (ctx.isStage) this.globals.set(decl.name, info);
     else ctx.lists.set(decl.name, info);
@@ -386,8 +406,11 @@ export class Compiler {
 
   declareFunction(ctx, decl) {
     if (ctx.funcs.has(decl.name)) {
+      const first = ctx.funcs.get(decl.name);
+      const where = this.where(first.loc);
       this.fail(
-        `Duplicate function ${JSON.stringify(decl.name)} in ${ctx.targetName}`,
+        `Duplicate function ${JSON.stringify(decl.name)} in ${ctx.targetName}` +
+          (where ? ` (already declared in ${where})` : ""),
         decl.loc,
       );
     }
@@ -403,6 +426,7 @@ export class Compiler {
       returns: decl.returns,
       warp: !!decl.warp,
       decl,
+      loc: decl.loc,
       definitionId: null,
     });
   }

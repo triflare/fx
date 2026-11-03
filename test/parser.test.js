@@ -26,6 +26,16 @@ test("parses sprite, variable, list, hat and function declarations", () => {
   assert.equal(ast.sprites[0].body[4].returns, true);
 });
 
+test("parses partial sprite modifiers without capturing them in the name", () => {
+  const ast = parse('sprite "Cat" {}\npartial sprite "Cat" { let lives = 9; }');
+  assert.equal(ast.sprites.length, 2);
+  assert.equal(ast.sprites[0].name, "Cat");
+  assert.equal(ast.sprites[0].partial, false);
+  assert.equal(ast.sprites[1].name, "Cat");
+  assert.equal(ast.sprites[1].partial, true);
+  assert.equal(ast.sprites[1].body[0].type, "VarDecl");
+});
+
 test("parses expressions with correct precedence", () => {
   const ast = parse('sprite "S" { let x = 1 + 2 * 3; }');
   const init = ast.sprites[0].body[0].init;
