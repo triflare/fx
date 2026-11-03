@@ -1,13 +1,13 @@
 /**
  * PenguinMod extension bindings.
  *
- * MeowScript keeps its catalog centralized, so third-party extensions are
+ * Triflare Fx keeps its catalog centralized, so third-party extensions are
  * supported by *synthesizing* catalog entries at build time: the extension
  * source is evaluated in an isolated QuickJS WebAssembly runtime that shims the
  * `Scratch.*` API it expects, then `getInfo()` is read back and translated into
  * the same descriptor shape used by `catalog.js`.
  *
- * A MeowScript call `myExtension.myBlock(...)` maps onto the runtime opcode
+ * A Triflare Fx call `myExtension.myBlock(...)` maps onto the runtime opcode
  * `myExtension_myBlock`, exactly how scratch-vm names extension blocks.
  *
  * Extension sources are untrusted: they run with no filesystem, network or
@@ -182,7 +182,7 @@ export const Cast = {
 // -------------------------------------------------------------- translation
 
 /**
- * Map a `Scratch.ArgumentType` onto a MeowScript input descriptor.
+ * Map a `Scratch.ArgumentType` onto a Triflare Fx input descriptor.
  * @param {object} arg
  * @returns {{type: string}}
  */
@@ -688,13 +688,13 @@ export async function loadExtensions(
     warnings.push(
       `extension ${label} (id "${id}") requires unsandboxed mode; allow it to run ` +
         `unsandboxed when opening the project in PenguinMod (or add "${id}" to ` +
-        "project.unsandboxed in meowscript.yml once you trust it)",
+        "project.unsandboxed in fx.yml once you trust it)",
     );
   }
   for (const name of declared) {
     if (declaredNotNeeded.has(name)) {
       warnings.push(
-        `project.unsandboxed entry "${name}" loads in the sandbox; remove it from meowscript.yml`,
+        `project.unsandboxed entry "${name}" loads in the sandbox; remove it from fx.yml`,
       );
     } else if (!declaredSeen.has(name)) {
       warnings.push(

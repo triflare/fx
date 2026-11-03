@@ -1,15 +1,15 @@
 /**
- * Shared error types and a small diagnostic formatter for MeowScript.
+ * Shared error types and a small diagnostic formatter for Triflare Fx.
  */
 
-export class MeowError extends Error {
+export class FxError extends Error {
   /**
    * @param {string} message
    * @param {{line?: number, column?: number, file?: string, source?: string}} [info]
    */
   constructor(message, info = {}) {
     super(message);
-    this.name = "MeowError";
+    this.name = "FxError";
     this.line = info.line;
     this.column = info.column;
     this.file = info.file;
@@ -34,21 +34,21 @@ export class MeowError extends Error {
   }
 }
 
-export class LexError extends MeowError {
+export class LexError extends FxError {
   constructor(message, info) {
     super(message, info);
     this.name = "LexError";
   }
 }
 
-export class ParseError extends MeowError {
+export class ParseError extends FxError {
   constructor(message, info) {
     super(message, info);
     this.name = "ParseError";
   }
 }
 
-export class CompileError extends MeowError {
+export class CompileError extends FxError {
   constructor(message, info) {
     super(message, info);
     this.name = "CompileError";

@@ -1,7 +1,7 @@
 /**
- * MeowScript block catalog.
+ * Triflare Fx block catalog.
  *
- * This module is the single source of truth for how a MeowScript
+ * This module is the single source of truth for how a Triflare Fx
  * `category.function(...)` call maps onto a Scratch/PenguinMod opcode: its shape
  * (command/reporter/boolean/hat), its inputs, its dropdown fields and any
  * mutation it requires. The compiler, the decompiler and the editor tooling all

@@ -1,0 +1,28 @@
+# Identity
+name: "Triflare Fx"
+command: "fx"
+version: "1.0.0"
+tagline: "Code PenguinMod projects with text."
+author: "Triflare"
+homepage: "https://github.com/triflare/fx"
+
+# Branding
+branding:
+  colors:
+    primary: "#8B5CF6"
+    secondary: "#5D1CF2"
+    tertiary: "#420BC0"
+
+# Terminal Glyphs
+symbols:
+  success: "✓"
+  error: "✗"
+  progress: "~"
+  bullet: "•"
+
+# Defaults
+defaults:
+  configFilename: "fx.yml"
+  sourceExtension: ".tfx"
+  sourceDirectory: "src"
+  outputDirectory: "build"

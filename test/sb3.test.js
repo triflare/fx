@@ -227,7 +227,7 @@ test("unzipSync rejects non-zip input", () => {
 });
 
 test("zipSync output is a real file on disk", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meow-zip-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-zip-"));
   const file = path.join(dir, "out.pmp");
   fs.writeFileSync(
     file,

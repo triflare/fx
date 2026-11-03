@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
 import { CATALOG, LIST_OPS, blockNames } from "../../../src/catalog.js";
-import { MeowError } from "../../../src/errors.js";
+import { FxError } from "../../../src/errors.js";
 import { parse } from "../../../src/parser.js";
 
-const LANGUAGE_ID = "meowscript";
+const LANGUAGE_ID = "fx";
 const DEBOUNCE_MS = 300;
 
 /** Statement-level keywords, mirroring src/parser.js. */
@@ -77,7 +77,7 @@ function kindFor(entry: { kind?: string }): vscode.CompletionItemKind {
  * Completions after `<qualifier>.` and, in expression/statement position,
  * keywords, hat events and every catalog block name.
  */
-class MeowScriptCompletionProvider implements vscode.CompletionItemProvider {
+class FxCompletionProvider implements vscode.CompletionItemProvider {
   provideCompletionItems(
     document: vscode.TextDocument,
     position: vscode.Position,
@@ -184,7 +184,7 @@ function refreshDiagnostics(
   }
 }
 
-/** Convert a thrown MeowError (or anything else) into a diagnostic. */
+/** Convert a thrown FxError (or anything else) into a diagnostic. */
 function toDiagnostic(
   error: unknown,
   document: vscode.TextDocument,
@@ -192,8 +192,8 @@ function toDiagnostic(
   const name = error instanceof Error ? error.name : "Error";
   const message = error instanceof Error ? error.message : String(error);
   // Errors carry 1-based line/column; VS Code ranges are 0-based.
-  const rawLine = error instanceof MeowError ? error.line : undefined;
-  const rawColumn = error instanceof MeowError ? error.column : undefined;
+  const rawLine = error instanceof FxError ? error.line : undefined;
+  const rawColumn = error instanceof FxError ? error.column : undefined;
   const line = Math.max(0, (rawLine ?? 1) - 1);
   const column = Math.max(0, (rawColumn ?? 1) - 1);
 
@@ -235,7 +235,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
       { language: LANGUAGE_ID },
-      new MeowScriptCompletionProvider(),
+      new FxCompletionProvider(),
       ".", // trigger category/list-method completion after the dot
     ),
     vscode.workspace.onDidOpenTextDocument((document) =>

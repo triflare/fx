@@ -13,9 +13,9 @@ function readJson(relative) {
   return JSON.parse(fs.readFileSync(path.join(vscodeDir, relative), "utf8"));
 }
 
-const grammar = readJson("syntaxes/meowscript.tmLanguage.json");
+const grammar = readJson("syntaxes/fx.tmLanguage.json");
 const languageConfig = readJson("language-configuration.json");
-const snippets = readJson("snippets/meowscript.json");
+const snippets = readJson("snippets/fx.json");
 const manifest = readJson("package.json");
 
 const categories = [...new Set(blockNames().map((name) => name.split(".")[0]))];
@@ -24,7 +24,7 @@ const hatNames = Object.entries(CATALOG)
   .map(([name]) => name.split(".")[1]);
 
 test("grammar: valid structure", () => {
-  assert.equal(grammar.scopeName, "source.meowscript");
+  assert.equal(grammar.scopeName, "source.fx");
   for (const rule of grammar.patterns) {
     assert.ok(
       grammar.repository[rule.include.slice(1)],
@@ -109,8 +109,8 @@ test("manifest: contributions point at files that exist", () => {
   assert.equal(manifest.browser, "./dist/extension.js");
   assert.deepEqual(manifest.extensionKind, ["ui", "workspace"]);
   const [language] = manifest.contributes.languages;
-  assert.equal(language.id, "meowscript");
-  assert.deepEqual(language.extensions, [".ms"]);
+  assert.equal(language.id, "fx");
+  assert.deepEqual(language.extensions, [".tfx"]);
   for (const file of [
     language.configuration,
     manifest.contributes.grammars[0].path,

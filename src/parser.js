@@ -1,8 +1,8 @@
 /**
- * MeowScript parser.
+ * Triflare Fx parser.
  *
  * Recursive-descent parser turning a token stream into a small, explicit AST.
- * MeowScript is intentionally context-free: keywords are recognised by shape
+ * Triflare Fx is intentionally context-free: keywords are recognised by shape
  * (`sprite "..."`, `when <event>`, `let ...`) rather than being reserved words.
  */
 import { tokenize } from "./lexer.js";
@@ -590,7 +590,7 @@ class Parser {
 }
 
 /**
- * Parse a MeowScript source string into an AST.
+ * Parse a Triflare Fx source string into an AST.
  * @param {string} source
  * @param {string} [file]
  */

@@ -1,0 +1,7 @@
+{
+  "name": "taffydb",
+  "version": "2.7.4",
+  "description": "Removed stub: taffydb is unmaintained and affected by CVE-2019-10790, and scratch-vm does not use it.",
+  "main": "index.js",
+  "license": "BSD-2-Clause"
+}

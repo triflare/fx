@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("generated sb3 loads through the PenguinMod runtime", async () => {
   const { sb3 } = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   const vm = await loadProject(sb3);
   assert.deepEqual(
@@ -85,7 +85,7 @@ test("a returning custom block yields its value at runtime", async () => {
 
 test("the runtime recognises the stored config comment", async () => {
   const { sb3 } = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   const vm = await loadProject(sb3);
   const stage = vm.runtime.targets.find((target) => target.isStage);

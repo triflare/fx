@@ -17,7 +17,7 @@ function opcodes(project) {
 
 test("compiles the spec fixture with pen extension and assets", () => {
   const result = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   assert.deepEqual(
     result.project.targets.map((t) => t.name),
@@ -47,7 +47,7 @@ test("compiles a standalone source string with variables and list operations", (
             }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   const { project } = compile(ast, { project: { width: 480, height: 360 } });
   const codes = opcodes(project);
@@ -65,7 +65,7 @@ test("marks returning procedures with a return mutation", () => {
             when greenFlag { looks.say(level()); }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   const { project } = compile(ast, { project: {} });
   const sprite = project.targets.find((t) => !t.isStage);
@@ -155,7 +155,7 @@ test("normalizes hex colors and emits a stop mutation", () => {
             }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   const { project } = compile(ast, { project: {} });
   const sprite = project.targets.find((t) => !t.isStage);
@@ -180,7 +180,7 @@ test("marks forever loops with PenguinMod's loop nub mutation", () => {
             }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   const { project } = compile(ast, { project: {} });
   const sprite = project.targets.find((t) => !t.isStage);
@@ -210,7 +210,7 @@ test("orders dropdowns before value inputs for mixed blocks", () => {
             }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   const { project } = compile(ast, { project: {} });
   const sprite = project.targets.find((t) => !t.isStage);
@@ -256,7 +256,7 @@ test("stores project settings in a stage _twconfig_ comment", () => {
 });
 
 test("rejects statements outside a hat", () => {
-  const ast = parse('sprite "S" { looks.show(); }', "inline.ms");
+  const ast = parse('sprite "S" { looks.show(); }', "inline.tfx");
   assert.throws(
     () => compile(ast, { project: {} }),
     (err) => {
@@ -270,19 +270,19 @@ test("rejects statements outside a hat", () => {
 test("rejects unknown blocks", () => {
   const ast = parse(
     'sprite "S" { when greenFlag { motion.teleport(1); } }',
-    "inline.ms",
+    "inline.tfx",
   );
   assert.throws(() => compile(ast, { project: {} }), /Unknown block/);
 });
 
 test("emits the pen extension only when pen blocks are used", () => {
   const withPen = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   assert.deepEqual(withPen.project.extensions, ["pen"]);
 
   const withoutPen = compile(
-    parse('sprite "S" { when greenFlag { looks.show(); } }', "inline.ms"),
+    parse('sprite "S" { when greenFlag { looks.show(); } }', "inline.tfx"),
     { project: {} },
   );
   assert.deepEqual(withoutPen.project.extensions, []);
@@ -305,7 +305,7 @@ test("compiles catalog boolean inputs, including infix and/or", () => {
             }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   const { project } = compile(ast, { project: {} });
   const codes = opcodes(project);
@@ -343,7 +343,7 @@ test("rejects statements after a block that ends the script", () => {
   ];
   for (const [source, pattern] of cases) {
     assert.throws(
-      () => compile(parse(source, "inline.ms"), { project: {} }),
+      () => compile(parse(source, "inline.tfx"), { project: {} }),
       pattern,
       source,
     );
@@ -362,7 +362,7 @@ test("allows blocks after a non-terminal stop and a terminal block last", () => 
             when cloneStart { control.deleteThisClone(); }
         }
     `,
-    "inline.ms",
+    "inline.tfx",
   );
   assert.doesNotThrow(() => compile(ast, { project: {} }));
 });

@@ -10,28 +10,28 @@ import { parse } from "../src/parser.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("decompiles a project back into parseable MeowScript", () => {
+test("decompiles a project back into parseable Triflare Fx", () => {
   const { sb3 } = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   const source = decompile(sb3);
   assert.match(source, /sprite "Player Character" \{/);
   assert.match(source, /when greenFlag \{/);
   assert.match(source, /returning function getHealthStatus\(\)/);
   assert.match(source, /jump\(\);/);
-  assert.doesNotThrow(() => parse(source, "roundtrip.ms"));
+  assert.doesNotThrow(() => parse(source, "roundtrip.tfx"));
 });
 
 test("round-trips through compile -> decompile -> compile", () => {
   const first = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   const source = decompile(first.sb3);
   const loadAsset = () =>
     Buffer.from(
       '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>',
     );
-  const { project } = compile(parse(source, "roundtrip.ms"), {
+  const { project } = compile(parse(source, "roundtrip.tfx"), {
     project: {},
     loadAsset,
   });
@@ -44,14 +44,14 @@ test("round-trips through compile -> decompile -> compile", () => {
 
 test("reads project JSON directly as well as zipped sb3", () => {
   const { project, sb3 } = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   assert.equal(decompile(project), decompile(sb3));
 });
 
 test("accepts an asset prefix when emitting costume references", () => {
   const { project } = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   const source = decompileProject(project, { assetPrefix: "assets/" });
   assert.match(source, /idle: "assets\/[0-9a-f]+\.svg"/);
@@ -59,7 +59,7 @@ test("accepts an asset prefix when emitting costume references", () => {
 
 test("the sb3 zip contains project.json plus the referenced assets", () => {
   const { sb3, assets } = build({
-    file: path.join(root, "test/fixtures/player/player.ms"),
+    file: path.join(root, "test/fixtures/player/player.tfx"),
   });
   const files = unzipSync(sb3);
   assert.ok(files.has("project.json"));

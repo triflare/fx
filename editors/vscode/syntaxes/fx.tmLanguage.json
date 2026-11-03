@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "MeowScript",
-  "scopeName": "source.meowscript",
+  "name": "Triflare Fx",
+  "scopeName": "source.fx",
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
@@ -18,11 +18,11 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.double-slash.meowscript",
+          "name": "comment.line.double-slash.fx",
           "match": "//.*$"
         },
         {
-          "name": "comment.block.meowscript",
+          "name": "comment.block.fx",
           "begin": "/\\*",
           "end": "\\*/"
         }
@@ -31,13 +31,13 @@
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.meowscript",
+          "name": "string.quoted.double.fx",
           "begin": "\"",
           "end": "\"",
           "patterns": [{ "include": "#string-escapes" }]
         },
         {
-          "name": "string.quoted.single.meowscript",
+          "name": "string.quoted.single.fx",
           "begin": "'",
           "end": "'",
           "patterns": [{ "include": "#string-escapes" }]
@@ -45,17 +45,17 @@
       ]
     },
     "string-escapes": {
-      "name": "constant.character.escape.meowscript",
+      "name": "constant.character.escape.fx",
       "match": "\\\\(n|t|r|\"|'|\\\\)"
     },
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.meowscript",
+          "name": "constant.numeric.fx",
           "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
         },
         {
-          "name": "constant.numeric.meowscript",
+          "name": "constant.numeric.fx",
           "match": "(?<![\\w.])\\.\\d+([eE][+-]?\\d+)?\\b"
         }
       ]
@@ -65,9 +65,9 @@
         {
           "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm)(\\.)([A-Za-z_$][\\w$]*)",
           "captures": {
-            "1": { "name": "support.module.meowscript" },
-            "2": { "name": "punctuation.accessor.meowscript" },
-            "3": { "name": "support.function.meowscript" }
+            "1": { "name": "support.module.fx" },
+            "2": { "name": "punctuation.accessor.fx" },
+            "3": { "name": "support.function.fx" }
           }
         }
       ]
@@ -76,7 +76,7 @@
       "patterns": [
         {
           "match": "\\b(greenFlag|keyPressed|spriteClicked|stageClicked|cloneStart|broadcast|broadcastReceived|backdropSwitchesTo|loudnessGreaterThan|timerGreaterThan)\\b(?=\\s*[({]|\\s*$)",
-          "name": "support.function.hat.meowscript"
+          "name": "support.function.hat.fx"
         }
       ]
     },
@@ -84,7 +84,7 @@
       "patterns": [
         {
           "match": "\\b(layer|costumes|sounds)\\b(?=\\s*:)",
-          "name": "variable.other.property.meowscript"
+          "name": "variable.other.property.fx"
         }
       ]
     },
@@ -92,27 +92,27 @@
       "patterns": [
         {
           "match": "\\bsprite\\b(?=\\s*\")",
-          "name": "keyword.other.sprite.meowscript"
+          "name": "keyword.other.sprite.fx"
         },
         {
           "match": "\\bstage\\b(?=\\s*\\{)",
-          "name": "keyword.other.stage.meowscript"
+          "name": "keyword.other.stage.fx"
         },
         {
           "match": "\\b(let|cloud|list|function|returning|warp)\\b",
-          "name": "keyword.other.declaration.meowscript"
+          "name": "keyword.other.declaration.fx"
         },
         {
           "match": "\\b(when|if|else|repeat|while|forever|return)\\b",
-          "name": "keyword.control.meowscript"
+          "name": "keyword.control.fx"
         },
         {
           "match": "\\b(and|or|not)\\b",
-          "name": "keyword.operator.word.meowscript"
+          "name": "keyword.operator.word.fx"
         },
         {
           "match": "\\b(boolean|number|string)\\b(?=\\s*[,)])",
-          "name": "storage.type.meowscript"
+          "name": "storage.type.fx"
         }
       ]
     },
@@ -120,7 +120,7 @@
       "patterns": [
         {
           "match": "\\b(true|false)\\b",
-          "name": "constant.language.meowscript"
+          "name": "constant.language.fx"
         }
       ]
     },
@@ -128,7 +128,7 @@
       "patterns": [
         {
           "match": "(\\+=|-=|\\*=|/=|==|!=|<=|>=|&&|\\|\\||[+\\-*/%=<>!])",
-          "name": "keyword.operator.meowscript"
+          "name": "keyword.operator.fx"
         }
       ]
     },
@@ -136,31 +136,31 @@
       "patterns": [
         {
           "match": "[{}]",
-          "name": "punctuation.section.block.meowscript"
+          "name": "punctuation.section.block.fx"
         },
         {
           "match": "[()]",
-          "name": "punctuation.section.group.meowscript"
+          "name": "punctuation.section.group.fx"
         },
         {
           "match": "[\\[\\]]",
-          "name": "punctuation.section.array.meowscript"
+          "name": "punctuation.section.array.fx"
         },
         {
           "match": ",",
-          "name": "punctuation.separator.meowscript"
+          "name": "punctuation.separator.fx"
         },
         {
           "match": ";",
-          "name": "punctuation.terminator.meowscript"
+          "name": "punctuation.terminator.fx"
         },
         {
           "match": ":",
-          "name": "punctuation.separator.key-value.meowscript"
+          "name": "punctuation.separator.key-value.fx"
         },
         {
           "match": "\\.",
-          "name": "punctuation.accessor.meowscript"
+          "name": "punctuation.accessor.fx"
         }
       ]
     }

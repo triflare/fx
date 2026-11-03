@@ -1,5 +1,5 @@
 /**
- * MeowScript lexer.
+ * Triflare Fx lexer.
  *
  * Produces a flat list of tokens with 1-based line/column information so that
  * downstream errors can point at the exact source location.
@@ -52,7 +52,7 @@ const isDigit = (ch) => ch >= "0" && ch <= "9";
  */
 
 /**
- * Tokenize a MeowScript source string.
+ * Tokenize a Triflare Fx source string.
  * @param {string} source
  * @param {string} [file]
  * @returns {Token[]}

@@ -1,15 +1,16 @@
 /**
  * Multi-file project assembly.
  *
- * A MeowScript project can be spread across any number of `.ms` files in a
+ * A Triflare Fx project can be spread across any number of `.tfx` files in a
  * directory tree. This module discovers those files and merges their ASTs into
  * a single `Program`, so the rest of the pipeline keeps working with one AST.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { ParseError } from "./errors.js";
+import { sourceExtension } from "./brand.js";
 
-/** Directories never scanned for `.ms` sources. */
+/** Directories never scanned for `.tfx` sources. */
 const IGNORED_DIRS = new Set([
   "node_modules",
   "build",
@@ -19,7 +20,7 @@ const IGNORED_DIRS = new Set([
 ]);
 
 /**
- * Recursively find every `.ms` file under `dir`, skipping hidden entries and
+ * Recursively find every `.tfx` file under `dir`, skipping hidden entries and
  * well-known build/dependency directories. Results are deterministic (sorted by
  * path) so builds are reproducible.
  * @param {string} dir
@@ -28,6 +29,7 @@ const IGNORED_DIRS = new Set([
 export function discoverSources(dir) {
   const root = path.resolve(dir);
   const found = [];
+  const extension = sourceExtension().toLowerCase();
 
   const walk = (current) => {
     let entries;
@@ -43,7 +45,10 @@ export function discoverSources(dir) {
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name)) continue;
         walk(full);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".ms")) {
+      } else if (
+        entry.isFile() &&
+        entry.name.toLowerCase().endsWith(extension)
+      ) {
         found.push(full);
       }
     }

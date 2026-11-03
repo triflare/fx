@@ -1,4 +1,4 @@
-// Bundles the MeowScript extension (and its web smoke tests) into single ESM
+// Bundles the Triflare Fx extension (and its web smoke tests) into single ESM
 // files that both the desktop extension host and the web (browser worker)
 // extension host can load.
 //

@@ -9,7 +9,7 @@ import { compile } from "../src/compiler.js";
 import { parse } from "../src/parser.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const showcase = path.join(root, "test/fixtures/all-blocks/all-blocks.ms");
+const showcase = path.join(root, "test/fixtures/all-blocks/all-blocks.tfx");
 
 // Shadow-menu block opcodes and the field name each one carries. Taken from
 // PenguinMod's fork of scratch-blocks (`blocks_vertical/*.js`) and the
@@ -111,7 +111,7 @@ test("the all-blocks showcase round-trips through decompile", () => {
     Buffer.from(
       '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>',
     );
-  const { project } = compile(parse(source, "roundtrip.ms"), {
+  const { project } = compile(parse(source, "roundtrip.tfx"), {
     project: {},
     loadAsset,
   });

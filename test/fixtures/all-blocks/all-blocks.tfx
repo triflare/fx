@@ -1,8 +1,8 @@
-// MeowScript "all blocks" showcase.
+// Triflare Fx "all blocks" showcase.
 //
 // Every built-in catalog block (all 116), plus the variable/list blocks that
 // the language emits directly and the custom-procedure forms, so that
-// `ms build examples/all-blocks` compiles the whole surface of the compiler.
+// `fx build examples/all-blocks` compiles the whole surface of the compiler.
 //
 // Blocks that return a value are consumed where a value is expected (usually
 // `looks.say(...)` or an `if (...)` condition); command blocks are called as

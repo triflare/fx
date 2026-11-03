@@ -1,13 +1,13 @@
 {
-  "name": "meowscript-language",
-  "displayName": "MeowScript Language Features",
-  "description": "Syntax highlighting, diagnostics and completions for MeowScript (.ms) — runs on the web (vscode.dev) too.",
-  "version": "1.1.0",
-  "publisher": "meowscriptjs",
+  "name": "fx-language-features",
+  "displayName": "Triflare Fx Language Features",
+  "description": "Language features for Triflare Fx.",
+  "version": "1.0.0",
+  "publisher": "triflare",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/meowscriptjs/meowscript",
+    "url": "https://github.com/triflare/fx",
     "directory": "editors/vscode"
   },
   "engines": {
@@ -27,28 +27,28 @@
   "contributes": {
     "languages": [
       {
-        "id": "meowscript",
+        "id": "fx",
         "aliases": [
-          "MeowScript",
-          "meowscript"
+          "Triflare Fx",
+          "fx"
         ],
         "extensions": [
-          ".ms"
+          ".tfx"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "snippets": [
       {
-        "language": "meowscript",
-        "path": "./snippets/meowscript.json"
+        "language": "fx",
+        "path": "./snippets/fx.json"
       }
     ],
     "grammars": [
       {
-        "language": "meowscript",
-        "scopeName": "source.meowscript",
-        "path": "./syntaxes/meowscript.tmLanguage.json"
+        "language": "fx",
+        "scopeName": "source.fx",
+        "path": "./syntaxes/fx.tmLanguage.json"
       }
     ]
   },
@@ -62,9 +62,12 @@
   "devDependencies": {
     "@types/vscode": "1.85",
     "@vscode/test-web": "^0.0.81",
-    "@vscode/vsce": "^4.0.0",
+    "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "minimatch": "^11.0.4"
   },
   "allowScripts": {
     "@playwright/browser-chromium@1.64.1": true,

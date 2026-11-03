@@ -1,5 +1,5 @@
 /**
- * High level build pipeline: `.ms` source(s) + `meowscript.yml` -> `.pmp` bytes.
+ * High level build pipeline: `.tfx` source(s) + `fx.yml` -> `.pmp` bytes.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -8,19 +8,20 @@ import { mergePrograms, discoverSources } from "./project.js";
 import { Compiler } from "./compiler.js";
 import { zipSync } from "./sb3.js";
 import { loadConfigFrom, DEFAULT_PROJECT } from "./config.js";
+import { sourceExtension } from "./brand.js";
 
 /**
  * @typedef {object} BuildOptions
- * @property {string} [source] MeowScript source text.
+ * @property {string} [source] Triflare Fx source text.
  * @property {string} [file] Path of a single source file.
  * @property {string[]} [files] Paths of several source files.
  * @property {Array<{file: string, source: string}>} [sources] Pre-read sources.
- * @property {string} [dir] Directory to scan for `.ms` files when no input is given.
- * @property {object} [projectConfig] Explicit project config (overrides meowscript.yml).
- * @property {string} [configDir] Directory to start the meowscript.yml search from.
+ * @property {string} [dir] Directory to scan for `.tfx` files when no input is given.
+ * @property {object} [projectConfig] Explicit project config (overrides fx.yml).
+ * @property {string} [configDir] Directory to start the fx.yml search from.
  * @property {Record<string, object>} [catalog] Extra catalog entries.
  * @property {Record<string, string>} [extensionUrls] Extension id -> URL map.
- * @property {boolean} [useConfigFile] Whether to auto-load meowscript.yml (default true).
+ * @property {boolean} [useConfigFile] Whether to auto-load fx.yml (default true).
  */
 
 /**
@@ -38,7 +39,9 @@ function resolveSources(options) {
         const file = path.resolve(entry);
         return { file, source: fs.readFileSync(file, "utf8") };
       }
-      const file = path.resolve(entry.file || path.join(dir, "input.ms"));
+      const file = path.resolve(
+        entry.file || path.join(dir, `input${sourceExtension()}`),
+      );
       return { file, source: entry.source };
     });
     return { dir, entries };
@@ -47,7 +50,10 @@ function resolveSources(options) {
   if (options.source != null) {
     const file = options.file
       ? path.resolve(options.file)
-      : path.join(path.resolve(options.dir || cwd), "input.ms");
+      : path.join(
+          path.resolve(options.dir || cwd),
+          `input${sourceExtension()}`,
+        );
     return {
       dir: options.dir ? path.resolve(options.dir) : path.dirname(file),
       entries: [{ file, source: options.source }],
@@ -78,7 +84,8 @@ function resolveSources(options) {
 
   const dir = path.resolve(options.dir || cwd);
   const files = discoverSources(dir);
-  if (files.length === 0) throw new Error(`No .ms files found under ${dir}`);
+  if (files.length === 0)
+    throw new Error(`No ${sourceExtension()} files found under ${dir}`);
   return {
     dir,
     entries: files.map((file) => ({
@@ -94,7 +101,8 @@ function resolveSources(options) {
  */
 export function build(options = {}) {
   const { dir, entries } = resolveSources(options);
-  if (entries.length === 0) throw new Error("No MeowScript sources to compile");
+  if (entries.length === 0)
+    throw new Error("No Triflare Fx sources to compile");
 
   let projectConfig = options.projectConfig || null;
   let configPath = null;

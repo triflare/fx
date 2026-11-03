@@ -14,7 +14,7 @@ import { ParseError, CompileError } from "../src/errors.js";
 import { zipSync } from "../src/sb3.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const bin = path.join(root, "bin", "meowscript.js");
+const bin = path.join(root, "bin", "fx.js");
 const execFileAsync = promisify(execFile);
 
 // A minimal extension that is loaded from a URL in the catalog test below.
@@ -38,7 +38,7 @@ const SIGNALS_EXT = `
 })(Scratch);
 `;
 
-function tmp(prefix = "meow-proj-") {
+function tmp(prefix = "fx-proj-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
@@ -47,28 +47,28 @@ function write(file, content) {
   fs.writeFileSync(file, content);
 }
 
-test("discovers .ms files recursively, skipping build and hidden directories", () => {
+test("discovers .tfx files recursively, skipping build and hidden directories", () => {
   const dir = tmp();
-  write(path.join(dir, "stage.ms"), "");
-  write(path.join(dir, "src", "a.ms"), "");
-  write(path.join(dir, "src", "nested", "b.ms"), "");
-  write(path.join(dir, "node_modules", "pkg", "nope.ms"), "");
-  write(path.join(dir, "build", "nope.ms"), "");
-  write(path.join(dir, ".hidden", "nope.ms"), "");
+  write(path.join(dir, "stage.tfx"), "");
+  write(path.join(dir, "src", "a.tfx"), "");
+  write(path.join(dir, "src", "nested", "b.tfx"), "");
+  write(path.join(dir, "node_modules", "pkg", "nope.tfx"), "");
+  write(path.join(dir, "build", "nope.tfx"), "");
+  write(path.join(dir, ".hidden", "nope.tfx"), "");
   write(path.join(dir, "notes.txt"), "");
 
   const found = discoverSources(dir).map((f) => path.relative(dir, f));
-  assert.deepEqual(found, ["src/a.ms", "src/nested/b.ms", "stage.ms"]);
+  assert.deepEqual(found, ["src/a.tfx", "src/nested/b.tfx", "stage.tfx"]);
 });
 
 test("mergePrograms rejects more than one stage across files", () => {
-  const a = parse("stage { let x = 0; }", "a.ms");
-  const b = parse("stage { let y = 0; }", "b.ms");
+  const a = parse("stage { let x = 0; }", "a.tfx");
+  const b = parse("stage { let y = 0; }", "b.tfx");
   assert.throws(
     () =>
       mergePrograms([
-        { ast: a, file: "a.ms" },
-        { ast: b, file: "b.ms" },
+        { ast: a, file: "a.tfx" },
+        { ast: b, file: "b.tfx" },
       ]),
     (err) => {
       assert.ok(err instanceof ParseError);
@@ -79,39 +79,39 @@ test("mergePrograms rejects more than one stage across files", () => {
 });
 
 test("mergePrograms rejects duplicate sprite names", () => {
-  const a = parse('sprite "Cat" { when greenFlag { looks.show(); } }', "a.ms");
-  const b = parse('sprite "Cat" { when greenFlag { looks.hide(); } }', "b.ms");
+  const a = parse('sprite "Cat" { when greenFlag { looks.show(); } }', "a.tfx");
+  const b = parse('sprite "Cat" { when greenFlag { looks.hide(); } }', "b.tfx");
   assert.throws(
     () =>
       mergePrograms([
-        { ast: a, file: "a.ms" },
-        { ast: b, file: "b.ms" },
+        { ast: a, file: "a.tfx" },
+        { ast: b, file: "b.tfx" },
       ]),
     (err) => {
       assert.ok(err instanceof ParseError);
       assert.match(err.message, /Duplicate sprite/);
-      assert.match(err.file, /b\.ms$/);
+      assert.match(err.file, /b\.tfx$/);
       return true;
     },
   );
 });
 
-test("build compiles every .ms file in a directory into one project", () => {
+test("build compiles every .tfx file in a directory into one project", () => {
   const dir = tmp();
-  write(path.join(dir, "meowscript.yml"), 'project:\n  name: "Merged"\n');
+  write(path.join(dir, "fx.yml"), 'project:\n  name: "Merged"\n');
   write(
-    path.join(dir, "src", "a.ms"),
+    path.join(dir, "src", "a.tfx"),
     'sprite "A" { when greenFlag { looks.show(); } }',
   );
   write(
-    path.join(dir, "src", "b.ms"),
+    path.join(dir, "src", "b.tfx"),
     'sprite "B" { when greenFlag { looks.hide(); } }',
   );
 
   const result = build({ dir });
   assert.deepEqual(
     result.files.map((f) => path.basename(f)),
-    ["a.ms", "b.ms"],
+    ["a.tfx", "b.tfx"],
   );
   assert.deepEqual(
     result.project.targets.map((t) => t.name),
@@ -122,9 +122,9 @@ test("build compiles every .ms file in a directory into one project", () => {
 
 test("shares globals and stage content declared across files", () => {
   const dir = tmp();
-  write(path.join(dir, "globals.ms"), "let score = 7;");
+  write(path.join(dir, "globals.tfx"), "let score = 7;");
   write(
-    path.join(dir, "player.ms"),
+    path.join(dir, "player.tfx"),
     'sprite "P" { when greenFlag { looks.say(score); } }',
   );
 
@@ -139,9 +139,9 @@ test("shares globals and stage content declared across files", () => {
 
 test("resolves asset paths relative to the file that references them", () => {
   const dir = tmp();
-  write(path.join(dir, "meowscript.yml"), 'project:\n  name: "Assets"\n');
+  write(path.join(dir, "fx.yml"), 'project:\n  name: "Assets"\n');
   write(
-    path.join(dir, "src", "cat.ms"),
+    path.join(dir, "src", "cat.tfx"),
     'sprite "Cat" {\n  costumes: { cat: "../assets/cat.svg" };\n  when greenFlag { looks.show(); }\n}',
   );
   write(
@@ -158,15 +158,15 @@ test("resolves asset paths relative to the file that references them", () => {
 
 test("reports duplicate globals declared in different files", () => {
   const dir = tmp();
-  write(path.join(dir, "a.ms"), "let score = 0;");
-  write(path.join(dir, "b.ms"), "let score = 1;");
+  write(path.join(dir, "a.tfx"), "let score = 0;");
+  write(path.join(dir, "b.tfx"), "let score = 1;");
 
   assert.throws(
     () => build({ dir }),
     (err) => {
       assert.ok(err instanceof CompileError);
       assert.match(err.message, /Duplicate global variable/);
-      assert.match(err.file, /b\.ms$/);
+      assert.match(err.file, /b\.tfx$/);
       return true;
     },
   );
@@ -175,11 +175,11 @@ test("reports duplicate globals declared in different files", () => {
 test("errors point at the file that actually contains the mistake", () => {
   const dir = tmp();
   write(
-    path.join(dir, "a.ms"),
+    path.join(dir, "a.tfx"),
     'sprite "A" { when greenFlag { looks.show(); } }',
   );
   write(
-    path.join(dir, "b.ms"),
+    path.join(dir, "b.tfx"),
     'sprite "B" { when greenFlag { motion.teleport(1); } }',
   );
 
@@ -187,7 +187,7 @@ test("errors point at the file that actually contains the mistake", () => {
     () => build({ dir }),
     (err) => {
       assert.match(err.message, /Unknown block/);
-      assert.match(err.file, /b\.ms$/);
+      assert.match(err.file, /b\.tfx$/);
       return true;
     },
   );
@@ -196,7 +196,7 @@ test("errors point at the file that actually contains the mistake", () => {
 test("cli one-letter aliases resolve to their long commands", () => {
   const dir = tmp();
   write(
-    path.join(dir, "main.ms"),
+    path.join(dir, "main.tfx"),
     'sprite "S" { when greenFlag { looks.show(); } }',
   );
 
@@ -211,22 +211,25 @@ test("cli one-letter aliases resolve to their long commands", () => {
   });
   assert.equal(built.status, 0, built.stderr);
   // The default output for a directory is build/<slug>.pmp.
-  const defaultOut = path.join(dir, "build", "meowscript-project.pmp");
-  assert.ok(fs.existsSync(defaultOut), "expected build/meowscript-project.pmp");
+  const defaultOut = path.join(dir, "build", "triflare-fx-project.pmp");
   assert.ok(
-    !fs.existsSync(path.join(dir, "build", "meowscript-project.sb3")),
+    fs.existsSync(defaultOut),
+    "expected build/triflare-fx-project.pmp",
+  );
+  assert.ok(
+    !fs.existsSync(path.join(dir, "build", "fx-project.sb3")),
     "build output should not use the .sb3 extension",
   );
   assert.match(built.stdout, /Built/);
 
   const catalog = spawnSync(process.execPath, [bin, "l"], { encoding: "utf8" });
   assert.equal(catalog.status, 0, catalog.stderr);
-  assert.match(catalog.stdout, /MeowScript catalog/);
+  assert.match(catalog.stdout, /Triflare Fx catalog/);
 });
 
 test("building a single file defaults to a .pmp next to the source", () => {
   const dir = tmp();
-  const source = path.join(dir, "game.ms");
+  const source = path.join(dir, "game.tfx");
   write(source, 'sprite "S" { when greenFlag { looks.show(); } }');
 
   const built = spawnSync(process.execPath, [bin, "b", source], {
@@ -262,10 +265,10 @@ test("boolean CLI flags leave the following input positional", () => {
   assert.ok(fs.existsSync(output));
 });
 
-test("building sources without .ms appends .pmp and preserves the source", () => {
+test("building sources without .tfx appends .pmp and preserves the source", () => {
   const dir = tmp();
   const content = 'sprite "S" { when greenFlag { looks.show(); } }';
-  for (const name of ["game", "game.txt", "game.MS"]) {
+  for (const name of ["game", "game.txt", "game.TFX"]) {
     const source = path.join(dir, name);
     write(source, content);
     const built = spawnSync(process.execPath, [bin, "b", source], {
@@ -273,7 +276,7 @@ test("building sources without .ms appends .pmp and preserves the source", () =>
     });
     assert.equal(built.status, 0, built.stderr);
     assert.equal(fs.readFileSync(source, "utf8"), content);
-    const output = name.endsWith(".MS") ? "game.pmp" : `${name}.pmp`;
+    const output = name.endsWith(".TFX") ? "game.pmp" : `${name}.pmp`;
     assert.ok(fs.existsSync(path.join(dir, output)));
   }
 });
@@ -309,7 +312,7 @@ test("decompile extracts only flat asset names and skips symlinks", () => {
       })),
     ]),
   );
-  const output = path.join(dir, "out.ms");
+  const output = path.join(dir, "out.tfx");
   const result = spawnSync(
     process.execPath,
     [bin, "d", input, "--assets", assetDir, "-o", output],
@@ -337,11 +340,11 @@ test("catalog lists blocks from extensions loaded over a URL", async () => {
   const { port } = server.address();
   try {
     write(
-      path.join(dir, "meowscript.yml"),
+      path.join(dir, "fx.yml"),
       `project:\n  name: "Cat"\n  extensions:\n    - "http://127.0.0.1:${port}/signals.js"\n`,
     );
     write(
-      path.join(dir, "main.ms"),
+      path.join(dir, "main.tfx"),
       'sprite "S" { when greenFlag { signals.send("hi"); } }',
     );
 
@@ -381,7 +384,7 @@ test("catalog lists local extensions without the build-only URL warning", async 
   const dir = tmp();
   write(path.join(dir, "signals.js"), SIGNALS_EXT);
   write(
-    path.join(dir, "meowscript.yml"),
+    path.join(dir, "fx.yml"),
     'project:\n  name: "Cat"\n  extensions:\n    - "./signals.js"\n',
   );
 
@@ -392,10 +395,9 @@ test("catalog lists local extensions without the build-only URL warning", async 
   assert.doesNotMatch(listed.stderr, /extensionURLs/);
 });
 
-test("package.json exposes both the meowscript and ms executables", () => {
+test("package.json exposes the fx executable", () => {
   const pkg = JSON.parse(
     fs.readFileSync(path.join(root, "package.json"), "utf8"),
   );
-  assert.equal(pkg.bin.meowscript, "bin/meowscript.js");
-  assert.equal(pkg.bin.ms, "bin/meowscript.js");
+  assert.equal(pkg.bin.fx, "bin/fx.js");
 });

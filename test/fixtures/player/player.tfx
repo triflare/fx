@@ -1,4 +1,4 @@
-// MeowScript syntax fixture — mirrors the language reference in the spec.
+// Triflare Fx syntax fixture — mirrors the language reference in the spec.
 sprite "Player Character" {
     layer: 2;
 

@@ -7,7 +7,7 @@ import { CATALOG } from "../src/catalog.js";
 import { loadProject } from "./helpers/vm.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const showcase = path.join(root, "test/fixtures/all-blocks/all-blocks.ms");
+const showcase = path.join(root, "test/fixtures/all-blocks/all-blocks.tfx");
 
 test("the all-blocks showcase uses every catalog block", () => {
   const { project } = build({ file: showcase, useConfigFile: false });

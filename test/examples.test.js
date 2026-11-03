@@ -9,7 +9,7 @@ import { loadProject } from "./helpers/vm.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const examplesDir = path.join(root, "examples");
 
-/** Every directory under `examples/` that contains at least one `.ms` file. */
+/** Every directory under `examples/` that contains at least one `.tfx` file. */
 function exampleProjects() {
   return fs
     .readdirSync(examplesDir, { withFileTypes: true })
@@ -19,7 +19,7 @@ function exampleProjects() {
       dir: path.join(examplesDir, entry.name),
     }))
     .filter(({ dir }) =>
-      fs.readdirSync(dir).some((file) => file.endsWith(".ms")),
+      fs.readdirSync(dir).some((file) => file.endsWith(".tfx")),
     );
 }
 

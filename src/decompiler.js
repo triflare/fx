@@ -1,5 +1,5 @@
 /**
- * MeowScript decompiler: Scratch 3 / PenguinMod project JSON -> `.ms` source.
+ * Triflare Fx decompiler: Scratch 3 / PenguinMod project JSON -> `.tfx` source.
  *
  * This is the inverse of `compiler.js`. It leans on the same catalog (reverse
  * opcode lookup) so the two stay in sync.
@@ -472,7 +472,7 @@ function indentText(text, prefix) {
 }
 
 /**
- * Decompile project JSON into MeowScript source.
+ * Decompile project JSON into Triflare Fx source.
  * @param {object} project
  * @param {{assetPrefix?: string}} [options]
  * @returns {string}
@@ -482,7 +482,7 @@ export function decompileProject(project, options) {
 }
 
 /**
- * Decompile a `.pmp`/`.sb3` buffer (or project JSON) into MeowScript source.
+ * Decompile a `.pmp`/`.sb3` buffer (or project JSON) into Triflare Fx source.
  * @param {Buffer|Uint8Array|object} input
  * @param {{assetPrefix?: string}} [options]
  * @returns {string}

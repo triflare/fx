@@ -1,5 +1,5 @@
 /**
- * MeowScript compiler: AST -> Scratch 3 / PenguinMod project JSON.
+ * Triflare Fx compiler: AST -> Scratch 3 / PenguinMod project JSON.
  *
  * The compiler is deliberately catalog-driven: every `category.block(...)` is
  * resolved through `catalog.js`, so adding a new block is a data change rather
@@ -115,7 +115,7 @@ class Context {
 export class Compiler {
   /**
    * @param {object} options
-   * @param {object} options.project normalized meowscript.yml project config
+   * @param {object} options.project normalized fx.yml project config
    * @param {(p: string) => Buffer} [options.loadAsset]
    * @param {Record<string, object>} [options.catalog] extra/overriding catalog entries
    * @param {Record<string, string>} [options.extensionUrls] id -> URL

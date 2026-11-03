@@ -14,10 +14,10 @@ import {
   CONFIG_MAGIC,
 } from "../src/config.js";
 
-test("parses the spec meowscript.yml fixture", () => {
+test("parses the spec fx.yml fixture", () => {
   const { project } = parseConfig(`
 project:
-  name: "MeowScript Adventure"
+  name: "Triflare Fx Adventure"
   fps: 60
   width: 480
   height: 360
@@ -29,7 +29,7 @@ project:
   unsandboxed:
     - signals
 `);
-  assert.equal(project.name, "MeowScript Adventure");
+  assert.equal(project.name, "Triflare Fx Adventure");
   assert.equal(project.framerate, 60);
   assert.equal(project.interpolation, true);
   assert.deepEqual(project.extensions, [
@@ -79,15 +79,12 @@ test("configComment returns null at defaults and ends with the magic string", ()
 });
 
 test("findConfigPath walks up from a nested source directory", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meow-cfg-"));
-  fs.writeFileSync(
-    path.join(dir, "meowscript.yml"),
-    'project:\n  name: "Root"\n',
-  );
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-cfg-"));
+  fs.writeFileSync(path.join(dir, "fx.yml"), 'project:\n  name: "Root"\n');
   fs.mkdirSync(path.join(dir, "src", "deep"), { recursive: true });
   assert.equal(
     findConfigPath(path.join(dir, "src", "deep")),
-    path.join(dir, "meowscript.yml"),
+    path.join(dir, "fx.yml"),
   );
   assert.equal(
     loadConfigFrom(path.join(dir, "src", "deep")).project.name,
@@ -96,7 +93,7 @@ test("findConfigPath walks up from a nested source directory", () => {
 });
 
 test("loadConfigFrom falls back to defaults when nothing is found", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meow-empty-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-empty-"));
   const { project, path: found } = loadConfigFrom(dir);
   assert.equal(found, null);
   assert.equal(project.name, DEFAULT_PROJECT.name);

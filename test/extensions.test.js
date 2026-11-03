@@ -14,7 +14,7 @@ import {
 } from "../src/extensions.js";
 
 function tempExtension(source) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meow-ext-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-ext-"));
   fs.writeFileSync(path.join(dir, "ext.js"), source);
   return dir;
 }
@@ -150,7 +150,7 @@ test("shim constructors cannot reach Node APIs or mutate host objects", async (t
         throw new Error('Node APIs leaked');
       }
     }
-    Object.prototype.meowExtensionPollution = true;
+    Object.prototype.fxExtensionPollution = true;
     Scratch.extensions.register({getInfo() { return {id: 'isolated', blocks: []}; }});
   `);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -158,11 +158,11 @@ test("shim constructors cannot reach Node APIs or mutate host objects", async (t
     baseDir: dir,
   });
   assert.deepEqual(ids, ["isolated"], warnings.join("\n"));
-  assert.equal(Object.prototype.meowExtensionPollution, undefined);
+  assert.equal(Object.prototype.fxExtensionPollution, undefined);
 });
 
 test("bounds source execution and getInfo execution in the CLI", (t) => {
-  const bin = fileURLToPath(new URL("../bin/meowscript.js", import.meta.url));
+  const bin = fileURLToPath(new URL("../bin/fx.js", import.meta.url));
   for (const source of [
     "while (true) {}",
     "Scratch.extensions.register({getInfo() { while (true) {} }});",
@@ -171,7 +171,7 @@ test("bounds source execution and getInfo execution in the CLI", (t) => {
     const dir = tempExtension(source);
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     fs.writeFileSync(
-      path.join(dir, "meowscript.yml"),
+      path.join(dir, "fx.yml"),
       'project:\n  extensions: ["./ext.js"]\n',
     );
     const result = spawnSync(process.execPath, [bin, "catalog", dir], {

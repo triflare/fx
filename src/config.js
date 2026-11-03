@@ -1,5 +1,5 @@
 /**
- * `meowscript.yml` project configuration and PenguinMod config emission.
+ * `fx.yml` project configuration and PenguinMod config emission.
  *
  * PenguinMod stores per-project runtime settings (framerate, stage size, turbo,
  * interpolation, ...) inside a stage comment whose final line ends with the
@@ -10,9 +10,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
+import { configFilename, configFilenames, productName } from "./brand.js";
 
 export const DEFAULT_PROJECT = {
-  name: "MeowScript Project",
+  name: `${productName()} Project`,
   framerate: 30,
   width: 480,
   height: 360,
@@ -71,12 +72,14 @@ export function normalizeProject(raw = {}) {
 export function parseConfig(text) {
   const raw = yaml.load(text) || {};
   if (typeof raw !== "object")
-    throw new Error("meowscript.yml must contain a mapping at the top level");
+    throw new Error(
+      `${configFilename()} must contain a mapping at the top level`,
+    );
   return { project: normalizeProject(raw.project || {}), raw };
 }
 
 /**
- * Find the nearest `meowscript.yml`/`meowscript.yaml`, walking up from `dir`.
+ * Find the nearest `fx.yml`/`fx.yaml`, walking up from `dir`.
  * This lets a project keep its config at the repository root while sources
  * live in `src/`.
  * @param {string} dir
@@ -85,7 +88,7 @@ export function parseConfig(text) {
 export function findConfigPath(dir) {
   let current = path.resolve(dir);
   for (;;) {
-    for (const name of ["meowscript.yml", "meowscript.yaml"]) {
+    for (const name of configFilenames()) {
       const candidate = path.join(current, name);
       if (fs.existsSync(candidate)) return candidate;
     }
@@ -96,7 +99,7 @@ export function findConfigPath(dir) {
 }
 
 /**
- * Find and load `meowscript.yml`/`meowscript.yaml` from a directory (or any of
+ * Find and load `fx.yml`/`fx.yaml` from a directory (or any of
  * its ancestors).
  * @param {string} dir
  * @returns {{project: typeof DEFAULT_PROJECT, raw: object, path: string|null}}
@@ -149,3 +152,10 @@ export function configComment(project) {
   if (Object.keys(payload).length === 0) return null;
   return `${COMMENT_PREAMBLE}\n${JSON.stringify(payload)}${CONFIG_MAGIC}`;
 }
+
+export {
+  addProjectExtension,
+  extensionKey,
+  readProjectExtensions,
+  removeProjectExtension,
+} from "./config-edit.js";

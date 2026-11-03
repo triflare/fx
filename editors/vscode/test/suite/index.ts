@@ -37,16 +37,14 @@ async function waitFor<T>(
 // ---------------------------------------------------------------------------
 
 test("extension activates", async () => {
-  const extension = vscode.extensions.getExtension(
-    "meowscriptjs.meowscript-language",
-  );
+  const extension = vscode.extensions.getExtension("triflare.fx-language");
   assert(extension, "extension not found in test host");
   await extension.activate();
 });
 
 test("syntax errors become diagnostics", async () => {
   const document = await vscode.workspace.openTextDocument({
-    language: "meowscript",
+    language: "fx",
     content: 'sprite "Cat" {\n  let x = ;\n',
   });
   const diagnostics = await waitFor(() => {
@@ -57,12 +55,12 @@ test("syntax errors become diagnostics", async () => {
     diagnostics[0].severity === vscode.DiagnosticSeverity.Error,
     "not an error",
   );
-  assert(diagnostics[0].source === "meowscript", "wrong diagnostic source");
+  assert(diagnostics[0].source === "fx", "wrong diagnostic source");
 });
 
 test("valid documents stay clean", async () => {
   const document = await vscode.workspace.openTextDocument({
-    language: "meowscript",
+    language: "fx",
     content:
       'sprite "Cat" {\n  when greenFlag {\n    motion.moveSteps(10);\n  }\n}\n',
   });
@@ -77,7 +75,7 @@ test("valid documents stay clean", async () => {
 
 test("completes catalog blocks after a category dot", async () => {
   const document = await vscode.workspace.openTextDocument({
-    language: "meowscript",
+    language: "fx",
     content: "motion.",
   });
   await vscode.window.showTextDocument(document);
@@ -104,7 +102,7 @@ test("completes catalog blocks after a category dot", async () => {
 
 test("completes hat events in plain context", async () => {
   const document = await vscode.workspace.openTextDocument({
-    language: "meowscript",
+    language: "fx",
     content: "when ",
   });
   await vscode.window.showTextDocument(document);
@@ -120,7 +118,7 @@ test("completes hat events in plain context", async () => {
 
 test("completes list methods after a list dot", async () => {
   const document = await vscode.workspace.openTextDocument({
-    language: "meowscript",
+    language: "fx",
     content: "items.",
   });
   await vscode.window.showTextDocument(document);

@@ -1,13 +1,13 @@
 # Examples
 
-Small MeowScript projects that compile straight to a PenguinMod `.pmp`.
+Small Triflare Fx projects that compile straight to a PenguinMod `.pmp`.
 They depend on shared costumes in the repository's [`assets/`](../assets/)
 directory and cannot be copied standalone. Each example has its own
-`meowscript.yml`, so you can build one at a time from this repository:
+`fx.yml`, so you can build one at a time from this repository:
 
 ```bash
-ms build examples/player     # -> examples/player/build/meowscript-player.pmp
-ms build examples/painter    # -> examples/painter/build/meowscript-painter.pmp
+fx build examples/player     # -> examples/player/build/triflare-fx-player.pmp
+fx build examples/painter    # -> examples/painter/build/triflare-fx-painter.pmp
 ```
 
 Then open the resulting `.pmp` in [PenguinMod](https://studio.penguinmod.com/)

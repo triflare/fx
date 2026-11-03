@@ -1,4 +1,4 @@
-// ESLint flat configuration for MeowScript.
+// ESLint flat configuration for Triflare Fx.
 //
 // ESLint owns code quality (unused bindings, undefined globals, suspicious
 // patterns); Prettier owns formatting. `eslint-config-prettier` is applied last
