@@ -56,6 +56,23 @@ function escapeHtml(text) {
 }
 
 /**
+ * Blank out HTML comments and raw-text element bodies while keeping every
+ * offset identical, so tag searches cannot match text that merely looks like
+ * markup (a `</body>` inside a script string, a commented-out tag, ...).
+ * @param {string} html
+ * @returns {string}
+ */
+function maskNonMarkup(html) {
+  const blank = (match) => match.replace(/[^\n]/g, " ");
+  return html
+    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(
+      /<(script|style|title|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+      blank,
+    );
+}
+
+/**
  * @param {string} html
  * @returns {string}
  */
@@ -84,11 +101,14 @@ export function injectDevClient(html) {
   });
 })();
 </script>`;
-  // Insert before the *last* closing body tag: packaged pages inline a bundle
-  // that can itself contain the literal text `</body>` inside a string, and
-  // injecting there would corrupt the script instead of ending the document.
+  // Insert before the *last* real closing body tag: packaged pages inline a
+  // bundle that can itself contain the literal text `</body>` inside a string,
+  // and injecting there would corrupt the script instead of ending the
+  // document. Comments and raw-text bodies are masked first so a quoted or
+  // commented-out `</body>` cannot capture the injection either.
   let bodyEnd = -1;
-  for (const match of html.matchAll(/<\/body\s*>/gi)) bodyEnd = match.index;
+  for (const match of maskNonMarkup(html).matchAll(/<\/body\s*>/gi))
+    bodyEnd = match.index;
   if (bodyEnd !== -1)
     return `${html.slice(0, bodyEnd)}${script}\n${html.slice(bodyEnd)}`;
   return `${html}${html.endsWith("\n") ? "" : "\n"}${script}`;

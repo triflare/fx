@@ -126,10 +126,21 @@ test("dev client is injected before the last closing body tag", () => {
     '<html><body>\n<script>const tpl = "</body>";</script>\n<h1>hi</h1>\n</body>\n</html>';
   const out = injectDevClient(html);
   assert.ok(out.indexOf("data-fx-dev") > out.indexOf("<h1>hi</h1>"));
+  assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
   assert.ok(out.includes('<script>const tpl = "</body>";</script>'));
   assert.equal(out.match(/<\/body>/g).length, 2);
   assert.ok(out.trimEnd().endsWith("</html>"));
   assert.equal(injectDevClient(out), out);
+});
+
+test("dev client ignores </body> in comments and trailing scripts", () => {
+  const html =
+    "<html><body><h1>hi</h1></body><!-- </body> -->\n" +
+    '<script>const tpl = "</body>";</script></html>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") < out.indexOf("</body>"));
+  assert.ok(out.includes("</body><!-- </body> -->"));
+  assert.ok(out.includes('<script>const tpl = "</body>";</script>'));
 });
 
 test("dev server picks the next free port unless strict", async () => {
