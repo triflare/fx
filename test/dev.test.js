@@ -151,6 +151,23 @@ test("dev client ignores </body> in iframe fallback content", () => {
   assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
 });
 
+test("dev client is not injected into plaintext content", () => {
+  // `<plaintext>` swallows the rest of the document, so no later tag is markup.
+  const html = "<html><body><h1>hi</h1><plaintext>raw </body> text";
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") < out.indexOf("<plaintext>"));
+  assert.ok(out.includes("<plaintext>raw </body> text"));
+});
+
+test("dev client ignores </body> inside quoted iframe attributes", () => {
+  // The start tag ends after the quoted `srcdoc`, not at the `>` inside it, and
+  // the missing `</iframe>` means the rest of the document is text.
+  const html = '<html><body><iframe srcdoc="</iframe></body>">fallback';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") < out.indexOf("<iframe"));
+  assert.ok(out.includes('<iframe srcdoc="</iframe></body>">fallback'));
+});
+
 test("dev server picks the next free port unless strict", async () => {
   const dir = tmp();
   const first = await startDevServer({
