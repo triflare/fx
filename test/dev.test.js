@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startDevServer } from "../src/dev.js";
+import { injectDevClient, startDevServer } from "../src/dev.js";
 
 const silent = { error() {}, success() {}, warn() {}, info() {} };
 
@@ -118,6 +118,86 @@ test("dev server reloads only when the built HTML changes", async () => {
     await server.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("dev client is injected before the last closing body tag", () => {
+  // Packaged pages inline a bundle whose strings can contain "</body>".
+  const html =
+    '<html><body>\n<script>const tpl = "</body>";</script>\n<h1>hi</h1>\n</body>\n</html>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("<h1>hi</h1>"));
+  assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
+  assert.ok(out.includes('<script>const tpl = "</body>";</script>'));
+  assert.equal(out.match(/<\/body>/g).length, 2);
+  assert.ok(out.trimEnd().endsWith("</html>"));
+  assert.equal(injectDevClient(out), out);
+});
+
+test("dev client ignores </body> in comments and trailing scripts", () => {
+  const html =
+    "<html><body><h1>hi</h1></body><!-- </body> -->\n" +
+    '<script>const tpl = "</body>";</script></html>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") < out.indexOf("</body>"));
+  assert.ok(out.includes("</body><!-- </body> -->"));
+  assert.ok(out.includes('<script>const tpl = "</body>";</script>'));
+});
+
+test("dev client ignores </body> in iframe fallback content", () => {
+  const html =
+    "<html><body><h1>hi</h1><iframe>fallback </body> text</iframe></body></html>";
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("</iframe>"));
+  assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
+});
+
+test("dev client is not injected into plaintext content", () => {
+  // `<plaintext>` swallows the rest of the document, so no later tag is markup.
+  const html = "<html><body><h1>hi</h1><plaintext>raw </body> text";
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") < out.indexOf("<plaintext>"));
+  assert.ok(out.includes("<plaintext>raw </body> text"));
+});
+
+test("dev client ignores </body> inside quoted iframe attributes", () => {
+  // The start tag ends after the quoted `srcdoc`, not at the `>` inside it, and
+  // the missing `</iframe>` means the rest of the document is text.
+  const html = '<html><body><iframe srcdoc="</iframe></body>">fallback';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") < out.indexOf("<iframe"));
+  assert.ok(out.includes('<iframe srcdoc="</iframe></body>">fallback'));
+});
+
+test("dev client ignores </body> in other start tags' attributes", () => {
+  // No real body end tag exists, so only the attribute text could match.
+  const html = '<html><body><p title="a</body>b">text</p>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("</p>"));
+  assert.ok(out.includes('<p title="a</body>b">text</p>'));
+});
+
+test("dev client ignores `<` in text before the real body end tag", () => {
+  // `1 < 2 and "unclosed` must not start a tag whose quote swallows the rest.
+  const html = '<html><body><p>1 < 2 and "unclosed </p></body></html>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("</p>"));
+  assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
+  assert.ok(out.includes('<p>1 < 2 and "unclosed </p>'));
+});
+
+test("dev client ignores </body> inside template contents", () => {
+  // Template contents are parsed into a separate fragment where `</body>` is
+  // ignored, so a template after the real body end cannot capture the client.
+  const template =
+    '<template><template><script>"</body>"</script></template>' +
+    "<div></body></div></template>";
+  const html = `<html><body><h1>hi</h1></body>${template}</html>`;
+  const out = injectDevClient(html);
+  const marker = out.indexOf("data-fx-dev");
+  assert.ok(marker > out.indexOf("</h1>"));
+  assert.ok(marker < out.indexOf("</body>"));
+  assert.ok(marker < out.indexOf("<template>"));
+  assert.ok(out.includes(template));
 });
 
 test("dev server picks the next free port unless strict", async () => {

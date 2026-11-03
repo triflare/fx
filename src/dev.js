@@ -56,6 +56,239 @@ function escapeHtml(text) {
 }
 
 /**
+ * Elements whose content the HTML tokenizer treats as text rather than markup.
+ * `noscript` is included because this page always runs scripts, which is
+ * exactly when the parser stops tokenizing its content.
+ */
+const RAW_TEXT_TAGS = new Set([
+  "script",
+  "style",
+  "title",
+  "textarea",
+  "iframe",
+  "noembed",
+  "noframes",
+  "xmp",
+  "noscript",
+]);
+
+/**
+ * Elements whose contents are parsed into a separate fragment: a `</body>`
+ * inside one is ignored by the document tokenizer, so it cannot be the
+ * document's body end either.
+ */
+const FRAGMENT_TAGS = new Set(["template"]);
+
+const TAG_NAME_AT = /<([a-zA-Z][^\s/>]*)/y;
+
+/**
+ * Index just past the start tag beginning at `start`, skipping quoted attribute
+ * values so a `>` inside `srcdoc="…"` cannot end the tag early. Returns -1 when
+ * the tag never closes.
+ * @param {string} html
+ * @param {number} start
+ * @returns {number}
+ */
+function startTagEnd(html, start) {
+  let quote = "";
+  for (let i = start + 1; i < html.length; i += 1) {
+    const char = html[i];
+    if (quote) {
+      if (char === quote) quote = "";
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ">") {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Index just past the first `</name>` at or after `from`, or -1.
+ * @param {string} html
+ * @param {string} name
+ * @param {number} from
+ * @returns {number}
+ */
+function endTagEnd(html, name, from) {
+  const pattern = new RegExp(`</${name}\\s*>`, "gi");
+  pattern.lastIndex = from;
+  const match = pattern.exec(html);
+  return match ? match.index + match[0].length : -1;
+}
+
+/**
+ * Index just past the `</name>` that closes the element whose start tag ends at
+ * `from`, honouring nested `name` elements and skipping comments and raw-text
+ * content. Returns -1 when the element never closes.
+ * @param {string} html
+ * @param {string} name
+ * @param {number} from
+ * @returns {number}
+ */
+function matchingClose(html, name, from) {
+  let depth = 1;
+  let i = from;
+
+  while (i < html.length) {
+    const tag = html.indexOf("<", i);
+    if (tag === -1) return -1;
+
+    if (html.startsWith("<!--", tag)) {
+      const commentEnd = html.indexOf("-->", tag + 4);
+      if (commentEnd === -1) return -1;
+      i = commentEnd + 3;
+      continue;
+    }
+
+    const end = startTagEnd(html, tag);
+    if (end === -1) return -1;
+
+    if (html[tag + 1] === "/") {
+      const nameAt = tag + 2;
+      if (
+        html.slice(nameAt, nameAt + name.length).toLowerCase() === name &&
+        " \t\n\f\r/>".includes(html[nameAt + name.length] ?? ">")
+      ) {
+        depth -= 1;
+        if (depth === 0) return end;
+      }
+      i = end;
+      continue;
+    }
+
+    TAG_NAME_AT.lastIndex = tag;
+    const match = TAG_NAME_AT.exec(html);
+    const inner = match ? match[1].toLowerCase() : "";
+
+    if (inner === name) {
+      depth += 1;
+      i = end;
+      continue;
+    }
+
+    // `<plaintext>` never closes, so nothing after it can close the fragment.
+    if (inner === "plaintext") return -1;
+
+    // Raw-text content is text, so a `</template>`-looking string in a script
+    // inside the fragment cannot close it early.
+    if (RAW_TEXT_TAGS.has(inner)) {
+      const raw = endTagEnd(html, inner, end);
+      if (raw === -1) return -1;
+      i = raw;
+      continue;
+    }
+
+    i = end;
+  }
+
+  return -1;
+}
+
+/**
+ * Find the ranges the HTML tokenizer treats as text rather than markup, so tag
+ * searches cannot match text that merely looks like markup (a `</body>` inside
+ * a script string, a commented-out tag, an attribute value, ...).
+ * @param {string} html
+ * @returns {{ranges: Array<[number, number]>, textFrom: number}} `ranges` are
+ *   sorted, non-overlapping `[start, end)` spans; `textFrom` is the offset
+ *   where a `<plaintext>` or unterminated tag/text element starts, so nothing
+ *   from there to end of input is markup. -1 when the whole input is markup.
+ */
+function nonMarkupRanges(html) {
+  /** @type {Array<[number, number]>} */
+  const ranges = [];
+  let textFrom = -1;
+  let i = 0;
+
+  while (i < html.length) {
+    const tag = html.indexOf("<", i);
+    if (tag === -1) break;
+
+    if (html.startsWith("<!--", tag)) {
+      const close = html.indexOf("-->", tag + 4);
+      const end = close === -1 ? html.length : close + 3;
+      ranges.push([tag, end]);
+      i = end;
+      continue;
+    }
+
+    TAG_NAME_AT.lastIndex = tag;
+    const match = TAG_NAME_AT.exec(html);
+    const name = match ? match[1].toLowerCase() : "";
+    const next = html[tag + 1] ?? "";
+
+    // A bare `<` (`1 < 2`) opens no tag, so carry on just after it: scanning
+    // from here could otherwise let a stray quote in text open an attribute
+    // quote and swallow real markup that follows.
+    if (!match && next !== "/" && next !== "!" && next !== "?") {
+      i = tag + 1;
+      continue;
+    }
+
+    const end = startTagEnd(html, tag);
+
+    // An unterminated tag, and `<plaintext>`, make the rest of the input text.
+    if (end === -1 || name === "plaintext") {
+      ranges.push([tag, html.length]);
+      textFrom = tag;
+      break;
+    }
+
+    // End tags and declarations have no attributes that could hide a tag.
+    if (name === "") {
+      i = end;
+      continue;
+    }
+
+    if (!RAW_TEXT_TAGS.has(name) && !FRAGMENT_TAGS.has(name)) {
+      // A start tag's quoted attributes are text too, so a `</body>` inside
+      // `title="…"` cannot capture the injection.
+      ranges.push([tag, end]);
+      i = end;
+      continue;
+    }
+
+    // Fragment contents (templates) are opaque to the document tokenizer, so a
+    // `</body>` inside them — nested templates included — is not the body end.
+    const close = FRAGMENT_TAGS.has(name)
+      ? matchingClose(html, name, end)
+      : endTagEnd(html, name, end);
+
+    // An element without its end tag also runs to end of input.
+    if (close === -1) {
+      ranges.push([tag, html.length]);
+      textFrom = tag;
+      break;
+    }
+
+    ranges.push([tag, close]);
+    i = close;
+  }
+
+  return { ranges, textFrom };
+}
+
+/**
+ * Offset of the last `</body>` outside the given text ranges, or -1.
+ * @param {string} html
+ * @param {Array<[number, number]>} ranges
+ * @returns {number}
+ */
+function lastBodyEnd(html, ranges) {
+  let bodyEnd = -1;
+  let next = 0;
+  for (const match of html.matchAll(/<\/body\s*>/gi)) {
+    while (next < ranges.length && ranges[next][1] <= match.index) next += 1;
+    const range = ranges[next];
+    if (range && range[0] <= match.index) continue; // text, not a tag
+    bodyEnd = match.index;
+  }
+  return bodyEnd;
+}
+
+/**
  * @param {string} html
  * @returns {string}
  */
@@ -84,9 +317,22 @@ export function injectDevClient(html) {
   });
 })();
 </script>`;
-  if (/<\/body\s*>/i.test(html))
-    return html.replace(/<\/body\s*>/i, `${script}\n</body>`);
-  return `${html}${html.endsWith("\n") ? "" : "\n"}${script}`;
+  // Insert before the *last* real closing body tag: packaged pages inline a
+  // bundle that can itself contain the literal text `</body>` inside a string,
+  // and injecting there would corrupt the script instead of ending the
+  // document. Comments, text-element content and attribute values are masked
+  // first so a quoted or commented-out `</body>` cannot capture the injection.
+  const { ranges, textFrom } = nonMarkupRanges(html);
+  const bodyEnd = lastBodyEnd(html, ranges);
+
+  // Without a usable body end tag, go before the point where the document
+  // turns into text (keeping the client a script rather than literal text),
+  // or append when the whole input was markup.
+  const at =
+    bodyEnd === -1 ? (textFrom === -1 ? html.length : textFrom) : bodyEnd;
+  const before = html.slice(0, at);
+  const separator = before === "" || before.endsWith("\n") ? "" : "\n";
+  return `${before}${separator}${script}${html.slice(at)}`;
 }
 
 /**
