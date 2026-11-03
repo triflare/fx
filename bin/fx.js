@@ -523,6 +523,11 @@ function extensionFileStem(id) {
  * projects keep plain URLs. Data URIs are written next to the output and
  * referenced from the config file; URLs stay URLs.
  *
+ * A decompiled archive is untrusted and the output directory is often the
+ * user's workspace, so embedded sources are never written over an existing
+ * path and never through a symlink. An extension that cannot be written is
+ * still loaded from the archive in memory, so its blocks decompile normally.
+ *
  * @param {object} project parsed project.json
  * @param {string|null} outDir directory that receives the config and extension files
  * @param {{fetchRemote?: boolean}} [options] `fetchRemote` loads plain URLs
@@ -533,6 +538,31 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
   const result = { entries: [], loadEntries: [], files: [], warnings: [] };
   const urls = project && project.extensionURLs;
   if (!urls || typeof urls !== "object") return result;
+
+  // Resolve the directory that receives embedded sources once, refusing a
+  // symlinked `extensions/` (which would redirect every write) and verifying
+  // that it really is a plain child of the output directory.
+  let extensionDir = null;
+  let extensionDirProblem = null;
+  const resolveExtensionDir = () => {
+    if (extensionDir || extensionDirProblem) return;
+    const dir = path.join(outDir, "extensions");
+    const existing = fs.lstatSync(dir, { throwIfNoEntry: false });
+    if (existing && !existing.isDirectory()) {
+      extensionDirProblem = existing.isSymbolicLink()
+        ? `"${dir}" is a symlink, so the extension would land outside the output directory`
+        : `"${dir}" is not a directory`;
+      return;
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    const expected = path.join(fs.realpathSync(outDir), "extensions");
+    const actual = fs.realpathSync(dir);
+    if (actual !== expected) {
+      extensionDirProblem = `"${dir}" resolves to ${actual}, outside the output directory`;
+      return;
+    }
+    extensionDir = dir;
+  };
 
   const used = new Set();
   for (const [id, value] of Object.entries(urls)) {
@@ -572,15 +602,54 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
       );
       continue;
     }
+    resolveExtensionDir();
+    if (extensionDirProblem) {
+      result.loadEntries.push(uri);
+      result.warnings.push(
+        `extension ${id} was not written: ${extensionDirProblem}; its blocks ` +
+          "still decompile, but the extension file is missing from the output",
+      );
+      continue;
+    }
     const base = extensionFileStem(id);
     let stem = base;
     for (let suffix = 2; used.has(stem); suffix += 1)
       stem = `${base}-${suffix}`;
     used.add(stem);
-    const file = path.join(outDir, "extensions", `${stem}.js`);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, source);
-    const relative = path.relative(outDir, file).split(path.sep).join("/");
+    const file = path.join(extensionDir, `${stem}.js`);
+    const relative = `extensions/${stem}.js`;
+    const existing = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (existing) {
+      // Never replace a workspace file. An identical regular file is already
+      // the copy we would have written, so reference it and leave it alone.
+      if (existing.isFile() && fs.readFileSync(file, "utf8") === source) {
+        result.files.push(relative);
+        result.entries.push(relative);
+        result.loadEntries.push(file);
+      } else {
+        result.loadEntries.push(uri);
+        result.warnings.push(
+          `extension ${id} not written to ${relative}: ` +
+            (existing.isSymbolicLink()
+              ? "the path is a symlink"
+              : "a different file already exists") +
+            "; delete or rename it to restore the extension",
+        );
+      }
+      continue;
+    }
+    try {
+      // `wx` fails instead of following a path that appeared in the meantime.
+      fs.writeFileSync(file, source, { flag: "wx" });
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      result.loadEntries.push(uri);
+      result.warnings.push(
+        `extension ${id} not written to ${relative}: the path appeared while ` +
+          "decompiling; delete or rename it to restore the extension",
+      );
+      continue;
+    }
     result.files.push(relative);
     result.entries.push(relative);
     result.loadEntries.push(file);
