@@ -13,7 +13,11 @@ export { build, writeSb3 } from "./build.js";
 export { discoverSources, mergePrograms } from "./project.js";
 export { decompile, decompileProject } from "./decompiler.js";
 export { zipSync, unzipSync, md5hex, imageSize, wavInfo } from "./sb3.js";
-export { loadExtensions } from "./extensions.js";
+export {
+  loadExtensions,
+  extensionDataUri,
+  readExtensionDataUri,
+} from "./extensions.js";
 export { readSprite, spriteArchive, spriteSource } from "./sprite.js";
 export { packageProject, loadPackager, packagerDistPath } from "./packager.js";
 export {

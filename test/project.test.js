@@ -11,7 +11,7 @@ import { discoverSources, mergePrograms } from "../src/project.js";
 import { build } from "../src/build.js";
 import { parse } from "../src/parser.js";
 import { ParseError, CompileError } from "../src/errors.js";
-import { zipSync } from "../src/sb3.js";
+import { zipSync, unzipSync } from "../src/sb3.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bin = path.join(root, "bin", "fx.js");
@@ -549,6 +549,65 @@ test("catalog lists local extensions without the build-only URL warning", async 
   });
   assert.match(listed.stdout, /signals\.send\s+-> signals_send/);
   assert.doesNotMatch(listed.stderr, /extensionURLs/);
+});
+
+test("decompile restores embedded extensions into fx.yml", () => {
+  const dir = tmp();
+  write(path.join(dir, "signals.js"), SIGNALS_EXT);
+  write(
+    path.join(dir, "fx.yml"),
+    'project:\n  name: "Cat"\n  extensions:\n    - "./signals.js"\n',
+  );
+  write(
+    path.join(dir, "main.tfx"),
+    'sprite "S" { when greenFlag { signals.send("hi"); } }',
+  );
+
+  const archive = path.join(dir, "out.pmp");
+  const built = spawnSync(process.execPath, [bin, "b", "-o", archive], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.equal(built.status, 0, built.stderr);
+  assert.doesNotMatch(built.stderr, /extensionURLs/);
+
+  const sourceDir = path.join(dir, "restored");
+  const output = path.join(sourceDir, "main.tfx");
+  const decompiled = spawnSync(
+    process.execPath,
+    [
+      bin,
+      "d",
+      archive,
+      "-o",
+      output,
+      "--assets",
+      path.join(sourceDir, "assets"),
+    ],
+    { cwd: dir, encoding: "utf8" },
+  );
+  assert.equal(decompiled.status, 0, decompiled.stderr);
+
+  const restored = fs.readFileSync(output, "utf8");
+  assert.match(restored, /signals\.send\("hi"\);/);
+  assert.ok(fs.existsSync(path.join(sourceDir, "extensions", "signals.js")));
+  const config = fs.readFileSync(path.join(sourceDir, "fx.yml"), "utf8");
+  assert.match(config, /extensions:/);
+  assert.match(config, /extensions\/signals\.js/);
+
+  // The restored project rebuilds from its own extension copy.
+  fs.rmSync(path.join(dir, "signals.js"));
+  const again = path.join(dir, "again.pmp");
+  const rebuilt = spawnSync(process.execPath, [bin, "b", "-o", again], {
+    cwd: sourceDir,
+    encoding: "utf8",
+  });
+  assert.equal(rebuilt.status, 0, rebuilt.stderr);
+  const project = JSON.parse(
+    unzipSync(fs.readFileSync(again)).get("project.json").toString("utf8"),
+  );
+  assert.deepEqual(project.extensions, ["signals"]);
+  assert.match(project.extensionURLs.signals, /^data:text\/javascript;base64,/);
 });
 
 test("package.json exposes the fx executable", () => {

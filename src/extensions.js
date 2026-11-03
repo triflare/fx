@@ -534,9 +534,55 @@ async function evaluateExtension(
 
 // ------------------------------------------------------------------- loading
 
+const DATA_URI = /^data:([^,]*),([\s\S]*)$/i;
+const BASE64_PAYLOAD = /^[A-Za-z0-9+/=\s]*$/;
+
+/**
+ * Encode extension source as a `data:` URI.
+ *
+ * Archives only remember extension sources through `project.extensionURLs`, so
+ * local extension files are baked in as data URIs (the same trick the
+ * PenguinMod packager uses when it bakes extensions). Base64 survives quotes,
+ * comments and non-ASCII text without escaping.
+ * @param {string} source
+ * @returns {string}
+ */
+export function extensionDataUri(source) {
+  const base64 = Buffer.from(String(source), "utf8").toString("base64");
+  return `data:text/javascript;base64,${base64}`;
+}
+
+/**
+ * Decode a `data:` URI back into extension source text.
+ * @param {string} uri
+ * @returns {string|null} source text, or null when the URI is unsupported
+ */
+export function readExtensionDataUri(uri) {
+  const match = DATA_URI.exec(String(uri).trim());
+  if (!match) return null;
+  const [, meta, payload] = match;
+  try {
+    if (/;base64\s*$/i.test(meta)) {
+      if (!BASE64_PAYLOAD.test(payload)) return null;
+      return Buffer.from(payload, "base64").toString("utf8");
+    }
+    return decodeURIComponent(payload);
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve a config entry to source text. */
 async function resolveSource(entry, baseDir, fetchImpl) {
   const value = String(entry);
+  if (/^data:/i.test(value)) {
+    const source = readExtensionDataUri(value);
+    if (source == null)
+      throw new Error(
+        "unsupported data URI; expected base64 or percent-encoded JavaScript",
+      );
+    return { source, remote: false, dataUri: true, url: value };
+  }
   if (/^https?:\/\//i.test(value)) {
     const fetchFn = fetchImpl || globalThis.fetch;
     if (typeof fetchFn !== "function")
@@ -597,23 +643,16 @@ async function evaluateExtensionAny(source, filename) {
 /**
  * Load a list of extension references.
  *
- * @param {Array<string>} list Paths or `http(s)://` URLs.
- * @param {{baseDir?: string, fetchImpl?: typeof fetch, expectUnsandboxed?: string|string[], localFileWarning?: boolean}} [options]
+ * @param {Array<string>} list Paths, `http(s)://` URLs or `data:` URIs.
+ * @param {{baseDir?: string, fetchImpl?: typeof fetch, expectUnsandboxed?: string|string[]}} [options]
  *   `expectUnsandboxed` acknowledges extensions that are known to require
- *   unsandboxed mode, silencing the warning for them. `localFileWarning`
- *   (default true) emits the build-specific notice that local files are not
- *   recorded in `extensionURLs`; listing commands turn it off.
+ *   unsandboxed mode, silencing the warning for them.
  * @returns {Promise<{catalog: Record<string, object>, extensionUrls: Record<string, string>, warnings: string[], ids: string[], unsandboxed: string[]}>}
  *   `unsandboxed` holds the ids of extensions that only load unsandboxed.
  */
 export async function loadExtensions(
   list,
-  {
-    baseDir = process.cwd(),
-    fetchImpl,
-    expectUnsandboxed = [],
-    localFileWarning = true,
-  } = {},
+  { baseDir = process.cwd(), fetchImpl, expectUnsandboxed = [] } = {},
 ) {
   const catalog = {};
   const extensionUrls = {};
@@ -631,17 +670,23 @@ export async function loadExtensions(
 
   for (const entry of list || []) {
     const label = String(entry);
+    // Data URIs are enormous; keep warning lines readable without breaking the
+    // path/URL matching that `expectUnsandboxed` relies on.
+    const name = label.length > 64 ? `${label.slice(0, 60)}…` : label;
     try {
-      const { source, remote, url, file } = await resolveSource(
+      const { source, remote, url, file, dataUri } = await resolveSource(
         entry,
         baseDir,
         fetchImpl,
       );
       const { infos, unsandboxed: needsUnsandboxed } =
-        await evaluateExtensionAny(source, remote ? url : file);
+        await evaluateExtensionAny(
+          source,
+          remote ? url : (file ?? "extension"),
+        );
       if (infos.length === 0) {
         warnings.push(
-          `extension ${label} did not call Scratch.extensions.register()`,
+          `extension ${name} did not call Scratch.extensions.register()`,
         );
         continue;
       }
@@ -649,10 +694,10 @@ export async function loadExtensions(
         const count = registerInfo(catalog, info, label);
         if (!ids.includes(info.id)) ids.push(info.id);
 
-        for (const name of [info.id, label]) {
-          if (!declared.has(name)) continue;
-          declaredSeen.add(name);
-          if (!needsUnsandboxed) declaredNotNeeded.add(name);
+        for (const candidate of [info.id, label]) {
+          if (!declared.has(candidate)) continue;
+          declaredSeen.add(candidate);
+          if (!needsUnsandboxed) declaredNotNeeded.add(candidate);
         }
 
         if (needsUnsandboxed) {
@@ -660,23 +705,18 @@ export async function loadExtensions(
           needsDeclaration.push({ id: info.id, label });
         }
 
-        if (remote) {
-          extensionUrls[info.id] = url;
-        } else if (localFileWarning) {
-          warnings.push(
-            `extension ${label} (id "${info.id}") is a local file; it will be referenced in ` +
-              "project.extensions but not in extensionURLs. Bundle it with the PenguinMod packager " +
-              "or host it before loading in the editor.",
-          );
-        }
+        // Remote URLs travel as-is; local (and already embedded) sources are
+        // recorded as data URIs so the archive carries the extension with it.
+        extensionUrls[info.id] =
+          remote || dataUri ? url : extensionDataUri(source);
         if (count === 0)
           warnings.push(
-            `extension ${label} (id "${info.id}") exposes no usable blocks`,
+            `extension ${name} (id "${info.id}") exposes no usable blocks`,
           );
       }
     } catch (err) {
       warnings.push(
-        `failed to load extension ${label}: ${err && err.message ? err.message : err}`,
+        `failed to load extension ${name}: ${err && err.message ? err.message : err}`,
       );
     }
   }

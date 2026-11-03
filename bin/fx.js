@@ -15,7 +15,7 @@ import process from "node:process";
 import { build } from "../src/build.js";
 import { parse } from "../src/parser.js";
 import { discoverSources, mergePrograms } from "../src/project.js";
-import { decompile } from "../src/decompiler.js";
+import { decompileProject } from "../src/decompiler.js";
 import { unzipSync } from "../src/sb3.js";
 import { CATALOG, blockNames } from "../src/catalog.js";
 import {
@@ -26,7 +26,7 @@ import {
   readProjectExtensions,
   removeProjectExtension,
 } from "../src/config.js";
-import { loadExtensions } from "../src/extensions.js";
+import { loadExtensions, readExtensionDataUri } from "../src/extensions.js";
 import { readSprite, spriteArchive, spriteSource } from "../src/sprite.js";
 import { packageProject } from "../src/packager.js";
 import {
@@ -40,6 +40,7 @@ import { startDevServer } from "../src/dev.js";
 import {
   brandText,
   configFilename,
+  configFilenames,
   outputDirectory,
   sourceDirectory,
   sourceExtension,
@@ -107,7 +108,8 @@ Commands:
   package   (p)  Package a source, project archive or directory into HTML or a ZIP
                  (Windows/macOS/Linux desktop builds use Electron).
   dev            Serve the packaged HTML and reload when the output changes.
-  decompile (d)  Convert a .pmp back into ${product.name} source.
+  decompile (d)  Convert a .pmp back into ${product.name} source, restoring
+                 extensions into ${configFilename(product)}.
   check     (c)  Parse a file (or every ${EXTENSION} file in a directory) for errors.
   catalog   (l)  List ${product.name} blocks, including those from ${configFilename(product)}
                  extensions (paths or URLs).
@@ -159,7 +161,7 @@ function fail(message) {
   process.exit(1);
 }
 
-async function loadProjectExtensions(dir, config, { localFileWarning } = {}) {
+async function loadProjectExtensions(dir, config) {
   const catalog = {};
   const extensionUrls = {};
   const unsandboxed = [];
@@ -168,7 +170,6 @@ async function loadProjectExtensions(dir, config, { localFileWarning } = {}) {
   const loaded = await loadExtensions(config.extensions, {
     baseDir: dir,
     expectUnsandboxed: config.unsandboxed,
-    localFileWarning,
   });
   Object.assign(catalog, loaded.catalog);
   Object.assign(extensionUrls, loaded.extensionUrls);
@@ -471,9 +472,7 @@ async function cmdCatalog(args) {
     : loadConfigFrom(args._[0] || process.cwd());
   const config = loaded.project;
   const extBase = loaded.path ? path.dirname(loaded.path) : process.cwd();
-  const { catalog } = await loadProjectExtensions(extBase, config || {}, {
-    localFileWarning: false,
-  });
+  const { catalog } = await loadProjectExtensions(extBase, config || {});
 
   const merged = { ...CATALOG, ...catalog };
   const names = Object.keys(merged).sort();
@@ -499,12 +498,139 @@ async function cmdCatalog(args) {
   }
 }
 
-function cmdDecompile(args) {
+function truncate(text, max) {
+  const value = String(text);
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/** Sanitize an extension id into a portable file name stem. */
+function extensionFileStem(id) {
+  return (
+    String(id)
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/^[.-]+|[.-]+$/g, "") || "extension"
+  );
+}
+
+/**
+ * Recover the extensions a decompiled project references.
+ *
+ * An archive only remembers extension sources through `project.extensionURLs`:
+ * Triflare Fx stores local extension files there as data URIs, and PenguinMod
+ * projects keep plain URLs. Data URIs are written next to the output and
+ * referenced from the config file; URLs stay URLs.
+ *
+ * @param {object} project parsed project.json
+ * @param {string|null} outDir directory that receives the config and extension files
+ * @returns {{entries: string[], loadEntries: string[], files: string[], warnings: string[]}}
+ */
+function restoreExtensions(project, outDir) {
+  const result = { entries: [], loadEntries: [], files: [], warnings: [] };
+  const urls = project && project.extensionURLs;
+  if (!urls || typeof urls !== "object") return result;
+
+  const used = new Set();
+  for (const [id, value] of Object.entries(urls)) {
+    const uri = typeof value === "string" ? value.trim() : "";
+    if (!uri) continue;
+    if (/^https?:\/\//i.test(uri)) {
+      result.entries.push(uri);
+      result.loadEntries.push(uri);
+      continue;
+    }
+    if (!/^data:/i.test(uri)) {
+      result.warnings.push(
+        `extension ${id} uses an unsupported URL (${truncate(uri, 48)}); ` +
+          `add it to ${configFilename(product)} by hand`,
+      );
+      continue;
+    }
+    const source = readExtensionDataUri(uri);
+    if (source == null) {
+      result.warnings.push(
+        `extension ${id} has an unreadable data URI; ` +
+          `add it to ${configFilename(product)} by hand`,
+      );
+      continue;
+    }
+    if (!outDir) {
+      result.loadEntries.push(uri);
+      result.warnings.push(
+        `extension ${id} is embedded in the archive; pass -o to write it out ` +
+          `and reference it from ${configFilename(product)}`,
+      );
+      continue;
+    }
+    const base = extensionFileStem(id);
+    let stem = base;
+    for (let suffix = 2; used.has(stem); suffix += 1)
+      stem = `${base}-${suffix}`;
+    used.add(stem);
+    const file = path.join(outDir, "extensions", `${stem}.js`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, source);
+    const relative = path.relative(outDir, file).split(path.sep).join("/");
+    result.files.push(relative);
+    result.entries.push(relative);
+    result.loadEntries.push(file);
+  }
+  return result;
+}
+
+/**
+ * Record restored extensions in `fx.yml`, creating one next to the decompiled
+ * source when the directory has none yet.
+ *
+ * @param {string} outDir
+ * @param {string[]} entries
+ * @returns {{file: string, added: number}|null}
+ */
+function writeRestoredConfig(outDir, entries) {
+  if (entries.length === 0) return null;
+  const existing = configFilenames()
+    .map((name) => path.join(outDir, name))
+    .find((file) => fs.existsSync(file));
+  if (existing) {
+    let added = 0;
+    for (const entry of entries)
+      if (addProjectExtension(existing, entry).added) added += 1;
+    return { file: existing, added };
+  }
+  const file = path.join(outDir, configFilenames()[0]);
+  const lines = ["project:", "  extensions:"];
+  for (const entry of entries) lines.push(`    - ${JSON.stringify(entry)}`);
+  lines.push("");
+  fs.writeFileSync(file, lines.join("\n"));
+  return { file, added: entries.length };
+}
+
+async function cmdDecompile(args) {
   const input = args._[0];
   if (!input)
     fail(`decompile requires an input .pmp file\n\n${usage(process.stderr)}`);
   const data = fs.readFileSync(input);
   const files = unzipSync(data);
+  const projectJson = files.get("project.json");
+  if (!projectJson) fail("Not a Scratch project: missing project.json");
+  const project = JSON.parse(projectJson.toString("utf8"));
+
+  const output = args.flags.o || args.flags.output;
+  const outDir = output ? path.dirname(path.resolve(output)) : null;
+  const restored = restoreExtensions(project, outDir);
+  for (const warning of restored.warnings)
+    process.stderr.write(`warning: ${warning}\n`);
+
+  // Extension sources also feed the catalog, so extension blocks decompile as
+  // real calls instead of "unsupported block".
+  let catalog = {};
+  if (restored.loadEntries.length > 0) {
+    const loaded = await loadExtensions(restored.loadEntries, {
+      baseDir: outDir || process.cwd(),
+    });
+    catalog = loaded.catalog;
+    for (const warning of loaded.warnings)
+      process.stderr.write(`warning: ${warning}\n`);
+  }
 
   const assetDir = args.flags.assets;
   let assetPrefix = "";
@@ -523,24 +649,23 @@ function cmdDecompile(args) {
       fs.writeFileSync(destination, buffer);
     }
     // Reference assets relative to the directory the source file will live in.
-    const outDir = path.dirname(
-      path.resolve(
-        args.flags.o ||
-          args.flags.output ||
-          path.join(process.cwd(), `out${EXTENSION}`),
-      ),
-    );
     const rel = path
-      .relative(outDir, path.resolve(assetDir))
+      .relative(outDir || process.cwd(), path.resolve(assetDir))
       .replace(/\\/g, "/");
     assetPrefix = rel ? `${rel}/` : "";
   }
 
-  const source = decompile(data, { assetPrefix });
-  const output = args.flags.o || args.flags.output;
+  const source = decompileProject(project, { assetPrefix, catalog });
   if (output) {
     fs.writeFileSync(output, source);
+    const config = writeRestoredConfig(outDir, restored.entries);
     log.success(`Decompiled ${input} -> ${output}`);
+    if (config)
+      log.success(
+        `Restored ${config.added} extension(s) -> ${
+          path.relative(process.cwd(), config.file) || config.file
+        }`,
+      );
   } else {
     process.stdout.write(source);
   }

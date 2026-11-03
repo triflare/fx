@@ -62,10 +62,25 @@ function numberText(value) {
   return String(value);
 }
 
+/** Reverse lookup for a merged catalog: opcode -> canonical catalog name. */
+function buildByOpcode(catalog) {
+  const map = new Map();
+  for (const [name, entry] of Object.entries(catalog)) {
+    if (!map.has(entry.opcode)) map.set(entry.opcode, name);
+  }
+  return map;
+}
+
 class Decompiler {
   constructor(project, options = {}) {
     this.project = project;
     this.assetPrefix = options.assetPrefix || "";
+    // Extension entries come from `loadExtensions`, so projects that use
+    // extensions decompile into real calls instead of "unsupported block".
+    this.catalog = options.catalog
+      ? { ...CATALOG, ...options.catalog }
+      : CATALOG;
+    this.byOpcode = options.catalog ? buildByOpcode(this.catalog) : BY_OPCODE;
     this.returningProccodes = new Set();
     for (const target of project.targets) {
       for (const block of Object.values(target.blocks)) {
@@ -149,6 +164,12 @@ class Decompiler {
       const field = Object.values(block.fields || {})[0];
       return field ? `"${escapeString(field[0])}"` : '""';
     }
+    // Extension menus are shadow blocks the catalog never describes; their
+    // chosen option is the only thing worth emitting.
+    if (block.shadow) {
+      const field = Object.values(block.fields || {})[0];
+      if (field) return `"${escapeString(field[0])}"`;
+    }
     if (block.opcode === "data_variable") return block.fields.VARIABLE[0];
     if (block.opcode === "data_listcontents") return block.fields.LIST[0];
     if (
@@ -191,13 +212,13 @@ class Decompiler {
       return `(not ${this.renderExpression(block.inputs.OPERAND)})`;
     }
 
-    const name = BY_OPCODE.get(block.opcode);
+    const name = this.byOpcode.get(block.opcode);
     if (name) return this.renderCatalogCall(name, block);
     return `/* unknown ${block.opcode} */`;
   }
 
   renderCatalogCall(name, block) {
-    const entry = CATALOG[name];
+    const entry = this.catalog[name];
     const args = [];
     for (const key of Object.keys(entry.fields || {})) {
       const field = block.fields[key];
@@ -279,12 +300,22 @@ class Decompiler {
           );
           return `${pad}${listName}.${method}(${args.join(", ")});`;
         }
-        const name = BY_OPCODE.get(block.opcode);
-        if (name && CATALOG[name].kind === "command") {
+        const name = this.byOpcode.get(block.opcode);
+        if (!name) return `${pad}// unsupported block ${block.opcode}`;
+        const entry = this.catalog[name];
+        const substacks = Object.entries(entry.inputs || {})
+          .filter(([, spec]) => spec.type === "substack")
+          .map(([input]) => input);
+        if (substacks.length === 0)
           return `${pad}${this.renderCatalogCall(name, block)};`;
-        }
-        if (name) return `${pad}${this.renderCatalogCall(name, block)};`;
-        return `${pad}// unsupported block ${block.opcode}`;
+        const primary = firstOf(block.inputs[substacks[0]]);
+        const alternate = substacks[1]
+          ? firstOf(block.inputs[substacks[1]])
+          : null;
+        const otherwise = alternate
+          ? ` else {${sub(firstOf(block.inputs[substacks[1]]))}\n${pad}}`
+          : "";
+        return `${pad}${this.renderCatalogCall(name, block)} {${sub(primary)}${otherwise}\n${pad}}`;
       }
     }
   }
@@ -321,8 +352,23 @@ class Decompiler {
         return `${pad}when ${kind}(${this.renderExpression(block.inputs.VALUE)}) {\n${body(block.next)}\n}`;
       }
       default:
-        return null;
+        return this.renderExtensionHat(block, pad, body);
     }
+  }
+
+  /** Render hats contributed by extensions, e.g. `when signals.onBang("x") {`. */
+  renderExtensionHat(block, pad, body) {
+    const name = this.byOpcode.get(block.opcode);
+    const entry = name ? this.catalog[name] : null;
+    if (!entry || entry.kind !== "hat") return null;
+    const args = (entry.args || []).map((spec) => {
+      if (spec.field) {
+        const field = (block.fields || {})[spec.field];
+        return `"${escapeString(field ? field[0] : "")}"`;
+      }
+      return this.renderExpression((block.inputs || {})[spec.input]);
+    });
+    return `${pad}when ${name}(${args.join(", ")}) {\n${body(block.next)}\n}`;
   }
 
   renderFunction(defBlock) {
@@ -474,7 +520,8 @@ function indentText(text, prefix) {
 /**
  * Decompile project JSON into Triflare Fx source.
  * @param {object} project
- * @param {{assetPrefix?: string}} [options]
+ * @param {{assetPrefix?: string, catalog?: Record<string, object>}} [options]
+ *   `catalog` adds extension entries from `loadExtensions`.
  * @returns {string}
  */
 export function decompileProject(project, options) {
@@ -484,7 +531,7 @@ export function decompileProject(project, options) {
 /**
  * Decompile a `.pmp`/`.sb3` buffer (or project JSON) into Triflare Fx source.
  * @param {Buffer|Uint8Array|object} input
- * @param {{assetPrefix?: string}} [options]
+ * @param {{assetPrefix?: string, catalog?: Record<string, object>}} [options]
  * @returns {string}
  */
 export function decompile(input, options) {
