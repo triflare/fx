@@ -13,7 +13,7 @@ import path from "node:path";
 import process from "node:process";
 import { build } from "../src/build.js";
 import { parse } from "../src/parser.js";
-import { discoverSources } from "../src/project.js";
+import { discoverSources, mergePrograms } from "../src/project.js";
 import { decompile } from "../src/decompiler.js";
 import { unzipSync } from "../src/sb3.js";
 import { CATALOG, blockNames } from "../src/catalog.js";
@@ -181,7 +181,7 @@ async function cmdBuild(args) {
   const searchDir = target.file ? path.dirname(target.file) : target.dir;
 
   const loaded = args.flags["no-config"]
-    ? { project: null, path: null }
+    ? { project: null, fx: null, path: null }
     : loadConfigFrom(searchDir);
   const config = loaded.project;
   const extBase = loaded.path ? path.dirname(loaded.path) : searchDir;
@@ -193,6 +193,7 @@ async function cmdBuild(args) {
   const result = build({
     ...target,
     projectConfig: config,
+    fxConfig: loaded.fx,
     catalog,
     extensionUrls,
     useConfigFile: !args.flags["no-config"],
@@ -238,9 +239,17 @@ function cmdCheck(args) {
   if (files.length === 0)
     fail(`No ${EXTENSION} files found under ${target.dir}`);
 
-  for (const file of files) {
-    parse(fs.readFileSync(file, "utf8"), file);
-  }
+  const searchDir = target.file ? path.dirname(target.file) : target.dir;
+  const loaded = args.flags["no-config"]
+    ? { fx: null }
+    : loadConfigFrom(searchDir);
+  const entries = files.map((file) => ({
+    ast: parse(fs.readFileSync(file, "utf8"), file),
+    file,
+  }));
+  mergePrograms(entries, {
+    partialSprites: loaded.fx?.partialSprites ?? false,
+  });
   log.success(`Checked ${files.length} file(s): OK`);
 }
 
@@ -336,6 +345,8 @@ function initFiles() {
   height: 360
   turbo: false
   interpolation: true
+fx:
+  partialSprites: false
 `,
     [`${sourceDirectory(product)}/main${EXTENSION}`]: `sprite "Cat" {
     costumes: {
@@ -403,14 +414,43 @@ async function readInputBytes(source) {
   return fs.readFileSync(source);
 }
 
-/** Every sprite declared under `dir`, in source order. */
+/** Every sprite declaration under `dir`, in source order. */
 function spriteNames(dir) {
   const sprites = [];
   for (const file of discoverSources(dir)) {
     const ast = parse(fs.readFileSync(file, "utf8"), file);
-    for (const sprite of ast.sprites) sprites.push({ name: sprite.name, file });
+    for (const sprite of ast.sprites) {
+      sprites.push({ name: sprite.name, file, partial: sprite.partial });
+    }
   }
   return sprites;
+}
+
+/** Group sprite declarations by name, tracking the base declaration. */
+function spriteGroups(dir) {
+  const groups = new Map();
+  for (const entry of spriteNames(dir)) {
+    let group = groups.get(entry.name);
+    if (!group) {
+      group = {
+        name: entry.name,
+        file: entry.file,
+        files: [],
+        partial: true,
+      };
+      groups.set(entry.name, group);
+    }
+    group.files.push(entry.file);
+    if (!entry.partial) {
+      group.file = entry.file;
+      group.partial = false;
+    }
+  }
+  for (const group of groups.values()) {
+    // Show the base file first, then fragments in discovery order.
+    group.files = [...new Set([group.file, ...group.files])];
+  }
+  return [...groups.values()];
 }
 
 function cmdExtensionAdd(args) {
@@ -518,7 +558,7 @@ async function cmdSpriteBuild(args) {
   if (!name) fail("sprite build requires a sprite name");
   const dir = process.cwd();
   const loaded = args.flags["no-config"]
-    ? { project: null, path: null }
+    ? { project: null, fx: null, path: null }
     : loadConfigFrom(dir);
   const config = loaded.project;
   const extBase = loaded.path ? path.dirname(loaded.path) : dir;
@@ -529,6 +569,7 @@ async function cmdSpriteBuild(args) {
   const result = build({
     dir,
     projectConfig: config,
+    fxConfig: loaded.fx,
     catalog,
     extensionUrls,
     useConfigFile: !args.flags["no-config"],
@@ -565,29 +606,38 @@ function cmdSpriteRemove(args) {
   const matches = spriteNames(dir).filter((entry) => entry.name === name);
   if (matches.length === 0)
     fail(`No sprite named ${JSON.stringify(name)} under ${dir}`);
-  if (matches.length > 1)
-    fail(
-      `${matches.length} files declare ${JSON.stringify(name)}; fix the duplicate first`,
-    );
 
-  const [{ file }] = matches;
-  const ast = parse(fs.readFileSync(file, "utf8"), file);
-  if (ast.sprites.length !== 1 || ast.topItems.length > 0 || ast.stage)
-    fail(`${file} also declares other code; remove the sprite block by hand`);
+  const files = [...new Set(matches.map((entry) => entry.file))];
+  for (const file of files) {
+    const ast = parse(fs.readFileSync(file, "utf8"), file);
+    const onlyThisSprite =
+      ast.sprites.length > 0 &&
+      ast.sprites.every((sprite) => sprite.name === name) &&
+      ast.topItems.length === 0 &&
+      !ast.stage;
+    if (!onlyThisSprite)
+      fail(`${file} also declares other code; remove the sprite block by hand`);
+  }
 
-  fs.rmSync(file);
-  log.success(`Removed sprite ${name} (${path.relative(dir, file)})`);
+  for (const file of files) fs.rmSync(file);
+  log.success(
+    `Removed sprite ${name} (${files
+      .map((file) => path.relative(dir, file) || file)
+      .join(", ")})`,
+  );
 }
 
 function cmdSpriteList(args) {
   const dir = path.resolve(args._[1] || process.cwd());
-  const sprites = spriteNames(dir);
+  const sprites = spriteGroups(dir);
   if (args.flags.json) {
     process.stdout.write(
       `${JSON.stringify(
-        sprites.map(({ name, file }) => ({
+        sprites.map(({ name, file, files, partial }) => ({
           name,
           file: path.relative(dir, file),
+          files: files.map((entry) => path.relative(dir, entry)),
+          partial,
         })),
         null,
         2,
@@ -599,9 +649,11 @@ function cmdSpriteList(args) {
     log.info(`No sprites under ${dir}`);
     return;
   }
-  for (const { name, file } of sprites)
+  for (const { name, files } of sprites)
     process.stdout.write(
-      `  ${name.padEnd(24)} ${path.relative(dir, file) || file}\n`,
+      `  ${name.padEnd(24)} ${files
+        .map((file) => path.relative(dir, file) || file)
+        .join(", ")}\n`,
     );
 }
 

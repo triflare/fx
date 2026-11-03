@@ -127,7 +127,12 @@ test("sprite add imports a sprite3 as source and assets", () => {
     const listed = run(["sprite", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
     assert.deepEqual(JSON.parse(listed.stdout), [
-      { name: "Robot", file: path.join("src", "robot.tfx") },
+      {
+        name: "Robot",
+        file: path.join("src", "robot.tfx"),
+        files: [path.join("src", "robot.tfx")],
+        partial: false,
+      },
     ]);
 
     const built = run(["build"], dir);
@@ -177,6 +182,50 @@ test("sprite remove deletes an imported sprite file", () => {
     assert.equal(removed.status, 0, removed.stderr);
     assert.ok(!fs.existsSync(path.join(dir, "src", "robot.tfx")));
     assert.equal(run(["sprite", "remove", "Robot"], dir).status, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("partial sprite fragments build, check, list and remove together", () => {
+  const dir = project();
+  try {
+    fs.writeFileSync(
+      path.join(dir, "fx.yml"),
+      'project:\n  name: "Demo"\nfx:\n  partialSprites: true\n',
+    );
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "src", "base.tfx"),
+      'sprite "Cat" { let lives = 9; }',
+    );
+    fs.writeFileSync(
+      path.join(dir, "src", "fragment.tfx"),
+      'partial sprite "Cat" { when greenFlag { looks.show(); } }',
+    );
+
+    const checked = run(["check"], dir);
+    assert.equal(checked.status, 0, checked.stderr);
+    assert.equal(run(["check", "--no-config"], dir).status, 1);
+
+    const built = run(["build"], dir);
+    assert.equal(built.status, 0, built.stderr);
+
+    const listed = run(["sprite", "list", "--json"], dir);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.deepEqual(JSON.parse(listed.stdout), [
+      {
+        name: "Cat",
+        file: path.join("src", "base.tfx"),
+        files: [path.join("src", "base.tfx"), path.join("src", "fragment.tfx")],
+        partial: false,
+      },
+    ]);
+
+    const removed = run(["sprite", "remove", "Cat"], dir);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.ok(!fs.existsSync(path.join(dir, "src", "base.tfx")));
+    assert.ok(!fs.existsSync(path.join(dir, "src", "fragment.tfx")));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

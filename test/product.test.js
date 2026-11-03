@@ -93,6 +93,10 @@ test("init uses the filenames and extension from product.yml", () => {
       fs.readFileSync(path.join(dir, "fx.yml"), "utf8"),
       /My Triflare Fx Project/,
     );
+    assert.match(
+      fs.readFileSync(path.join(dir, "fx.yml"), "utf8"),
+      /^fx:\n {2}partialSprites: false$/m,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
