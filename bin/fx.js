@@ -526,7 +526,8 @@ function extensionFileStem(id) {
  * A decompiled archive is untrusted and the output directory is often the
  * user's workspace, so embedded sources are never written over an existing
  * path and never through a symlink. An extension that cannot be written is
- * still loaded from the archive in memory, so its blocks decompile normally.
+ * still loaded from the archive in memory, so its blocks decompile normally,
+ * and its own data URI is recorded in the config so later builds keep it.
  *
  * @param {object} project parsed project.json
  * @param {string|null} outDir directory that receives the config and extension files
@@ -594,9 +595,16 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
       );
       continue;
     }
-    if (!outDir) {
+    // When no file can be written, the archive's own copy is the only faithful
+    // reference left, so the config keeps its data URI: a later build still has
+    // the extension without overwriting, or depending on, a workspace file.
+    const keepEmbedded = (warning) => {
       result.loadEntries.push(uri);
-      result.warnings.push(
+      if (outDir) result.entries.push(uri);
+      result.warnings.push(warning);
+    };
+    if (!outDir) {
+      keepEmbedded(
         `extension ${id} is embedded in the archive; pass -o to write it out ` +
           `and reference it from ${configFilename(product)}`,
       );
@@ -604,10 +612,10 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
     }
     resolveExtensionDir();
     if (extensionDirProblem) {
-      result.loadEntries.push(uri);
-      result.warnings.push(
+      keepEmbedded(
         `extension ${id} was not written: ${extensionDirProblem}; its blocks ` +
-          "still decompile, but the extension file is missing from the output",
+          "still decompile and the config keeps its source, but the extension " +
+          "file is missing from the output",
       );
       continue;
     }
@@ -627,13 +635,13 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
         result.entries.push(relative);
         result.loadEntries.push(file);
       } else {
-        result.loadEntries.push(uri);
-        result.warnings.push(
+        keepEmbedded(
           `extension ${id} not written to ${relative}: ` +
             (existing.isSymbolicLink()
               ? "the path is a symlink"
               : "a different file already exists") +
-            "; delete or rename it to restore the extension",
+            "; the config keeps the archive's copy, so delete or rename it to " +
+            "write the extension file",
         );
       }
       continue;
@@ -642,12 +650,13 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
       // `wx` fails instead of following a path that appeared in the meantime.
       fs.writeFileSync(file, source, { flag: "wx" });
     } catch (err) {
-      result.loadEntries.push(uri);
-      result.warnings.push(
+      keepEmbedded(
         `extension ${id} not written to ${relative}: ` +
           (err.code === "EEXIST"
-            ? "the path appeared while decompiling; delete or rename it to restore the extension"
-            : `${err.code || err.message}`),
+            ? "the path appeared while decompiling"
+            : `${err.code || err.message}`) +
+          "; the config keeps the archive's copy, so delete or rename it to " +
+          "write the extension file",
       );
       continue;
     }

@@ -628,10 +628,21 @@ test("decompile refuses to overwrite existing or symlinked extension files", () 
   });
   assert.equal(built.status, 0, built.stderr);
 
+  // Assets land next to the output, so a restored copy can rebuild on its own.
   const decompile = (out) =>
-    spawnSync(process.execPath, [bin, "d", archive, "-o", out], {
-      encoding: "utf8",
-    });
+    spawnSync(
+      process.execPath,
+      [
+        bin,
+        "d",
+        archive,
+        "-o",
+        out,
+        "--assets",
+        path.join(path.dirname(out), "assets"),
+      ],
+      { encoding: "utf8" },
+    );
 
   // A file the workspace already has wins over the archive's copy.
   const keptOutput = path.join(dir, "kept", "main.tfx");
@@ -643,7 +654,19 @@ test("decompile refuses to overwrite existing or symlinked extension files", () 
   assert.equal(fs.readFileSync(kept, "utf8"), "// the user's own copy\n");
   assert.match(keptResult.stderr, /not written to extensions\/signals\.js/);
   assert.match(fs.readFileSync(keptOutput, "utf8"), /signals\.send\("hi"\);/);
-  assert.ok(!fs.existsSync(path.join(dir, "kept", "fx.yml")));
+  // The config keeps the archive's own copy, so the project still builds while
+  // the workspace file stays untouched.
+  assert.match(
+    fs.readFileSync(path.join(dir, "kept", "fx.yml"), "utf8"),
+    /data:text\/javascript;base64,/,
+  );
+  const keptAgain = path.join(dir, "kept-again.pmp");
+  const rebuiltKept = spawnSync(process.execPath, [bin, "b", "-o", keptAgain], {
+    cwd: path.join(dir, "kept"),
+    encoding: "utf8",
+  });
+  assert.equal(rebuiltKept.status, 0, rebuiltKept.stderr);
+  assert.ok(fs.existsSync(keptAgain));
 
   // A symlinked extension file is never written through.
   const linkedOutput = path.join(dir, "linked", "main.tfx");
@@ -667,6 +690,10 @@ test("decompile refuses to overwrite existing or symlinked extension files", () 
   assert.equal(dirLinkedResult.status, 0, dirLinkedResult.stderr);
   assert.deepEqual(fs.readdirSync(outsideDir), []);
   assert.match(dirLinkedResult.stderr, /is a symlink/);
+  assert.match(
+    fs.readFileSync(path.join(dir, "dir-linked", "fx.yml"), "utf8"),
+    /data:text\/javascript;base64,/,
+  );
   assert.match(
     fs.readFileSync(dirLinkedOutput, "utf8"),
     /signals\.send\("hi"\);/,
