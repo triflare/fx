@@ -4,6 +4,11 @@
     "body": ["sprite \"${1:Cat}\" {", "\t$0", "}"],
     "description": "Declare a sprite"
   },
+  "partial sprite": {
+    "prefix": "partialsprite",
+    "body": ["partial sprite \"${1:Cat}\" {", "\t$0", "}"],
+    "description": "Add a fragment to a sprite declared in another file"
+  },
   "stage": {
     "prefix": "stage",
     "body": ["stage {", "\t$0", "}"],

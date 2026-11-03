@@ -55,6 +55,7 @@ test("grammar: statement keywords match the parser", () => {
     .map((rule) => rule.match)
     .join(" ");
   for (const keyword of [
+    "partial",
     "let",
     "cloud",
     "list",

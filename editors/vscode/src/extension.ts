@@ -9,6 +9,7 @@ const DEBOUNCE_MS = 300;
 /** Statement-level keywords, mirroring src/parser.js. */
 const KEYWORDS = [
   "sprite",
+  "partial",
   "stage",
   "let",
   "cloud",

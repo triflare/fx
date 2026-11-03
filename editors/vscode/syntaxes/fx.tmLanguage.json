@@ -91,6 +91,10 @@
     "keywords": {
       "patterns": [
         {
+          "match": "\\b(partial)(?=\\s+sprite\\b)",
+          "name": "keyword.other.modifier.fx"
+        },
+        {
           "match": "\\bsprite\\b(?=\\s*\")",
           "name": "keyword.other.sprite.fx"
         },
