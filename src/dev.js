@@ -72,6 +72,13 @@ const RAW_TEXT_TAGS = new Set([
   "noscript",
 ]);
 
+/**
+ * Elements whose contents are parsed into a separate fragment: a `</body>`
+ * inside one is ignored by the document tokenizer, so it cannot be the
+ * document's body end either.
+ */
+const FRAGMENT_TAGS = new Set(["template"]);
+
 const TAG_NAME_AT = /<([a-zA-Z][^\s/>]*)/y;
 
 /**
@@ -109,6 +116,74 @@ function endTagEnd(html, name, from) {
   pattern.lastIndex = from;
   const match = pattern.exec(html);
   return match ? match.index + match[0].length : -1;
+}
+
+/**
+ * Index just past the `</name>` that closes the element whose start tag ends at
+ * `from`, honouring nested `name` elements and skipping comments and raw-text
+ * content. Returns -1 when the element never closes.
+ * @param {string} html
+ * @param {string} name
+ * @param {number} from
+ * @returns {number}
+ */
+function matchingClose(html, name, from) {
+  let depth = 1;
+  let i = from;
+
+  while (i < html.length) {
+    const tag = html.indexOf("<", i);
+    if (tag === -1) return -1;
+
+    if (html.startsWith("<!--", tag)) {
+      const commentEnd = html.indexOf("-->", tag + 4);
+      if (commentEnd === -1) return -1;
+      i = commentEnd + 3;
+      continue;
+    }
+
+    const end = startTagEnd(html, tag);
+    if (end === -1) return -1;
+
+    if (html[tag + 1] === "/") {
+      const nameAt = tag + 2;
+      if (
+        html.slice(nameAt, nameAt + name.length).toLowerCase() === name &&
+        " \t\n\f\r/>".includes(html[nameAt + name.length] ?? ">")
+      ) {
+        depth -= 1;
+        if (depth === 0) return end;
+      }
+      i = end;
+      continue;
+    }
+
+    TAG_NAME_AT.lastIndex = tag;
+    const match = TAG_NAME_AT.exec(html);
+    const inner = match ? match[1].toLowerCase() : "";
+
+    if (inner === name) {
+      depth += 1;
+      i = end;
+      continue;
+    }
+
+    // `<plaintext>` never closes, so nothing after it can close the fragment.
+    if (inner === "plaintext") return -1;
+
+    // Raw-text content is text, so a `</template>`-looking string in a script
+    // inside the fragment cannot close it early.
+    if (RAW_TEXT_TAGS.has(inner)) {
+      const raw = endTagEnd(html, inner, end);
+      if (raw === -1) return -1;
+      i = raw;
+      continue;
+    }
+
+    i = end;
+  }
+
+  return -1;
 }
 
 /**
@@ -167,7 +242,7 @@ function nonMarkupRanges(html) {
       continue;
     }
 
-    if (!RAW_TEXT_TAGS.has(name)) {
+    if (!RAW_TEXT_TAGS.has(name) && !FRAGMENT_TAGS.has(name)) {
       // A start tag's quoted attributes are text too, so a `</body>` inside
       // `title="…"` cannot capture the injection.
       ranges.push([tag, end]);
@@ -175,8 +250,13 @@ function nonMarkupRanges(html) {
       continue;
     }
 
-    // A text element without its end tag also runs to end of input.
-    const close = endTagEnd(html, name, end);
+    // Fragment contents (templates) are opaque to the document tokenizer, so a
+    // `</body>` inside them — nested templates included — is not the body end.
+    const close = FRAGMENT_TAGS.has(name)
+      ? matchingClose(html, name, end)
+      : endTagEnd(html, name, end);
+
+    // An element without its end tag also runs to end of input.
     if (close === -1) {
       ranges.push([tag, html.length]);
       textFrom = tag;

@@ -185,6 +185,21 @@ test("dev client ignores `<` in text before the real body end tag", () => {
   assert.ok(out.includes('<p>1 < 2 and "unclosed </p>'));
 });
 
+test("dev client ignores </body> inside template contents", () => {
+  // Template contents are parsed into a separate fragment where `</body>` is
+  // ignored, so a template after the real body end cannot capture the client.
+  const template =
+    '<template><template><script>"</body>"</script></template>' +
+    "<div></body></div></template>";
+  const html = `<html><body><h1>hi</h1></body>${template}</html>`;
+  const out = injectDevClient(html);
+  const marker = out.indexOf("data-fx-dev");
+  assert.ok(marker > out.indexOf("</h1>"));
+  assert.ok(marker < out.indexOf("</body>"));
+  assert.ok(marker < out.indexOf("<template>"));
+  assert.ok(out.includes(template));
+});
+
 test("dev server picks the next free port unless strict", async () => {
   const dir = tmp();
   const first = await startDevServer({
