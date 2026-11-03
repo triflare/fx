@@ -67,7 +67,7 @@ function maskNonMarkup(html) {
   return html
     .replace(/<!--[\s\S]*?-->/g, blank)
     .replace(
-      /<(script|style|title|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+      /<(script|style|title|textarea|iframe|noembed|noframes|xmp|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
       blank,
     );
 }

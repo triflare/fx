@@ -143,6 +143,14 @@ test("dev client ignores </body> in comments and trailing scripts", () => {
   assert.ok(out.includes('<script>const tpl = "</body>";</script>'));
 });
 
+test("dev client ignores </body> in iframe fallback content", () => {
+  const html =
+    "<html><body><h1>hi</h1><iframe>fallback </body> text</iframe></body></html>";
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("</iframe>"));
+  assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
+});
+
 test("dev server picks the next free port unless strict", async () => {
   const dir = tmp();
   const first = await startDevServer({
