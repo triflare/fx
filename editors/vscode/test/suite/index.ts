@@ -37,8 +37,17 @@ async function waitFor<T>(
 // ---------------------------------------------------------------------------
 
 test("extension activates", async () => {
-  const extension = vscode.extensions.getExtension("triflare.fx-language");
-  assert(extension, "extension not found in test host");
+  // Match on the manifest name instead of a hard-coded "publisher.name" id,
+  // so renaming the extension cannot silently break this lookup again.
+  const extension = vscode.extensions.all.find(
+    (candidate) => candidate.packageJSON?.name === "fx-language-features",
+  );
+  assert(
+    extension,
+    `extension not found in test host (loaded: ${vscode.extensions.all
+      .map((candidate) => candidate.id)
+      .join(", ")})`,
+  );
   await extension.activate();
 });
 

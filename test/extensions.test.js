@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   loadExtensions,
+  readExtensionDataUri,
   BlockType,
   ArgumentType,
   BlockShape,
@@ -48,10 +49,13 @@ const SIGNALS = `
 
 test("synthesizes catalog entries with the right kinds and opcodes", async () => {
   const dir = tempExtension(SIGNALS);
-  const { catalog, warnings } = await loadExtensions(["./ext.js"], {
-    baseDir: dir,
-  });
-  assert.ok(warnings.some((w) => /local file/.test(w)));
+  const { catalog, extensionUrls, warnings } = await loadExtensions(
+    ["./ext.js"],
+    { baseDir: dir },
+  );
+  assert.deepEqual(warnings, []);
+  assert.match(extensionUrls.signals, /^data:text\/javascript;base64,/);
+  assert.equal(readExtensionDataUri(extensionUrls.signals), SIGNALS);
 
   assert.equal(catalog["signals.send"].opcode, "signals_send");
   assert.equal(catalog["signals.send"].kind, "command");

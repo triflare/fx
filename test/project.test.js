@@ -11,7 +11,7 @@ import { discoverSources, mergePrograms } from "../src/project.js";
 import { build } from "../src/build.js";
 import { parse } from "../src/parser.js";
 import { ParseError, CompileError } from "../src/errors.js";
-import { zipSync } from "../src/sb3.js";
+import { zipSync, unzipSync } from "../src/sb3.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bin = path.join(root, "bin", "fx.js");
@@ -549,6 +549,226 @@ test("catalog lists local extensions without the build-only URL warning", async 
   });
   assert.match(listed.stdout, /signals\.send\s+-> signals_send/);
   assert.doesNotMatch(listed.stderr, /extensionURLs/);
+});
+
+test("decompile restores embedded extensions into fx.yml", () => {
+  const dir = tmp();
+  write(path.join(dir, "signals.js"), SIGNALS_EXT);
+  write(
+    path.join(dir, "fx.yml"),
+    'project:\n  name: "Cat"\n  extensions:\n    - "./signals.js"\n',
+  );
+  write(
+    path.join(dir, "main.tfx"),
+    'sprite "S" { when greenFlag { signals.send("hi"); } }',
+  );
+
+  const archive = path.join(dir, "out.pmp");
+  const built = spawnSync(process.execPath, [bin, "b", "-o", archive], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.equal(built.status, 0, built.stderr);
+  assert.doesNotMatch(built.stderr, /extensionURLs/);
+
+  const sourceDir = path.join(dir, "restored");
+  const output = path.join(sourceDir, "main.tfx");
+  const decompiled = spawnSync(
+    process.execPath,
+    [
+      bin,
+      "d",
+      archive,
+      "-o",
+      output,
+      "--assets",
+      path.join(sourceDir, "assets"),
+    ],
+    { cwd: dir, encoding: "utf8" },
+  );
+  assert.equal(decompiled.status, 0, decompiled.stderr);
+
+  const restored = fs.readFileSync(output, "utf8");
+  assert.match(restored, /signals\.send\("hi"\);/);
+  assert.ok(fs.existsSync(path.join(sourceDir, "extensions", "signals.js")));
+  const config = fs.readFileSync(path.join(sourceDir, "fx.yml"), "utf8");
+  assert.match(config, /extensions:/);
+  assert.match(config, /extensions\/signals\.js/);
+
+  // The restored project rebuilds from its own extension copy.
+  fs.rmSync(path.join(dir, "signals.js"));
+  const again = path.join(dir, "again.pmp");
+  const rebuilt = spawnSync(process.execPath, [bin, "b", "-o", again], {
+    cwd: sourceDir,
+    encoding: "utf8",
+  });
+  assert.equal(rebuilt.status, 0, rebuilt.stderr);
+  const project = JSON.parse(
+    unzipSync(fs.readFileSync(again)).get("project.json").toString("utf8"),
+  );
+  assert.deepEqual(project.extensions, ["signals"]);
+  assert.match(project.extensionURLs.signals, /^data:text\/javascript;base64,/);
+});
+
+test("decompile refuses to overwrite existing or symlinked extension files", () => {
+  const dir = tmp();
+  write(path.join(dir, "signals.js"), SIGNALS_EXT);
+  write(
+    path.join(dir, "fx.yml"),
+    'project:\n  name: "Cat"\n  extensions:\n    - "./signals.js"\n',
+  );
+  write(
+    path.join(dir, "main.tfx"),
+    'sprite "S" { when greenFlag { signals.send("hi"); } }',
+  );
+  const archive = path.join(dir, "out.pmp");
+  const built = spawnSync(process.execPath, [bin, "b", "-o", archive], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.equal(built.status, 0, built.stderr);
+
+  // Assets land next to the output, so a restored copy can rebuild on its own.
+  const decompile = (out) =>
+    spawnSync(
+      process.execPath,
+      [
+        bin,
+        "d",
+        archive,
+        "-o",
+        out,
+        "--assets",
+        path.join(path.dirname(out), "assets"),
+      ],
+      { encoding: "utf8" },
+    );
+
+  // A file the workspace already has wins over the archive's copy.
+  const keptOutput = path.join(dir, "kept", "main.tfx");
+  fs.mkdirSync(path.dirname(keptOutput), { recursive: true });
+  const kept = path.join(dir, "kept", "extensions", "signals.js");
+  write(kept, "// the user's own copy\n");
+  const keptResult = decompile(keptOutput);
+  assert.equal(keptResult.status, 0, keptResult.stderr);
+  assert.equal(fs.readFileSync(kept, "utf8"), "// the user's own copy\n");
+  assert.match(keptResult.stderr, /not written to extensions\/signals\.js/);
+  assert.match(fs.readFileSync(keptOutput, "utf8"), /signals\.send\("hi"\);/);
+  // The config keeps the archive's own copy, so the project still builds while
+  // the workspace file stays untouched.
+  assert.match(
+    fs.readFileSync(path.join(dir, "kept", "fx.yml"), "utf8"),
+    /data:text\/javascript;base64,/,
+  );
+  const keptAgain = path.join(dir, "kept-again.pmp");
+  const rebuiltKept = spawnSync(process.execPath, [bin, "b", "-o", keptAgain], {
+    cwd: path.join(dir, "kept"),
+    encoding: "utf8",
+  });
+  assert.equal(rebuiltKept.status, 0, rebuiltKept.stderr);
+  assert.ok(fs.existsSync(keptAgain));
+
+  // A symlinked extension file is never written through.
+  const linkedOutput = path.join(dir, "linked", "main.tfx");
+  fs.mkdirSync(path.join(dir, "linked", "extensions"), { recursive: true });
+  const outside = path.join(dir, "outside.js");
+  write(outside, "// outside\n");
+  fs.symlinkSync(outside, path.join(dir, "linked", "extensions", "signals.js"));
+  const linkedResult = decompile(linkedOutput);
+  assert.equal(linkedResult.status, 0, linkedResult.stderr);
+  assert.equal(fs.readFileSync(outside, "utf8"), "// outside\n");
+  assert.match(linkedResult.stderr, /the path is a symlink/);
+  assert.match(fs.readFileSync(linkedOutput, "utf8"), /signals\.send\("hi"\);/);
+
+  // Nor is a symlinked extensions directory.
+  const dirLinkedOutput = path.join(dir, "dir-linked", "main.tfx");
+  fs.mkdirSync(path.dirname(dirLinkedOutput), { recursive: true });
+  const outsideDir = path.join(dir, "outside-dir");
+  fs.mkdirSync(outsideDir);
+  fs.symlinkSync(outsideDir, path.join(dir, "dir-linked", "extensions"));
+  const dirLinkedResult = decompile(dirLinkedOutput);
+  assert.equal(dirLinkedResult.status, 0, dirLinkedResult.stderr);
+  assert.deepEqual(fs.readdirSync(outsideDir), []);
+  assert.match(dirLinkedResult.stderr, /is a symlink/);
+  assert.match(
+    fs.readFileSync(path.join(dir, "dir-linked", "fx.yml"), "utf8"),
+    /data:text\/javascript;base64,/,
+  );
+  assert.match(
+    fs.readFileSync(dirLinkedOutput, "utf8"),
+    /signals\.send\("hi"\);/,
+  );
+
+  // Re-decompiling over the copy this run wrote is not a conflict.
+  const twiceOutput = path.join(dir, "twice", "main.tfx");
+  fs.mkdirSync(path.dirname(twiceOutput), { recursive: true });
+  const firstRun = decompile(twiceOutput);
+  assert.equal(firstRun.status, 0, firstRun.stderr);
+  const secondRun = decompile(twiceOutput);
+  assert.equal(secondRun.status, 0, secondRun.stderr);
+  assert.doesNotMatch(secondRun.stderr, /not written/);
+  assert.match(
+    fs.readFileSync(path.join(dir, "twice", "fx.yml"), "utf8"),
+    /extensions\/signals\.js/,
+  );
+});
+
+test("decompile leaves remote extensions to --fetch-extensions", async () => {
+  const dir = tmp();
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "text/javascript");
+    res.end(SIGNALS_EXT);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  try {
+    const url = `http://127.0.0.1:${port}/signals.js`;
+    write(
+      path.join(dir, "fx.yml"),
+      `project:\n  name: "Cat"\n  extensions:\n    - "${url}"\n`,
+    );
+    write(
+      path.join(dir, "main.tfx"),
+      'sprite "S" { when greenFlag { signals.send("hi"); } }',
+    );
+    const archive = path.join(dir, "out.pmp");
+    await execFileAsync(process.execPath, [bin, "b", "-o", archive], {
+      cwd: dir,
+    });
+
+    // Without the flag the URL is still recorded, but nothing is fetched.
+    const skippedOutput = path.join(dir, "skipped", "main.tfx");
+    fs.mkdirSync(path.dirname(skippedOutput), { recursive: true });
+    const skipped = await execFileAsync(
+      process.execPath,
+      [bin, "d", archive, "-o", skippedOutput],
+      { cwd: dir },
+    );
+    assert.match(skipped.stderr, /remote URL/);
+    assert.match(skipped.stderr, /--fetch-extensions/);
+    assert.match(
+      fs.readFileSync(skippedOutput, "utf8"),
+      /unsupported block signals_send/,
+    );
+    assert.match(
+      fs.readFileSync(path.join(dir, "skipped", "fx.yml"), "utf8"),
+      new RegExp(`http://127\\.0\\.0\\.1:${port}/signals\\.js`),
+    );
+
+    const fetchedOutput = path.join(dir, "fetched", "main.tfx");
+    fs.mkdirSync(path.dirname(fetchedOutput), { recursive: true });
+    await execFileAsync(
+      process.execPath,
+      [bin, "d", archive, "-o", fetchedOutput, "--fetch-extensions"],
+      { cwd: dir },
+    );
+    assert.match(
+      fs.readFileSync(fetchedOutput, "utf8"),
+      /signals\.send\("hi"\);/,
+    );
+  } finally {
+    server.close();
+  }
 });
 
 test("package.json exposes the fx executable", () => {
