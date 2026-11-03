@@ -691,7 +691,7 @@ export async function loadExtensions(
         continue;
       }
       for (const info of infos) {
-        const count = registerInfo(catalog, info, label);
+        const count = registerInfo(catalog, info, name);
         if (!ids.includes(info.id)) ids.push(info.id);
 
         for (const candidate of [info.id, label]) {
@@ -702,7 +702,7 @@ export async function loadExtensions(
 
         if (needsUnsandboxed) {
           if (!unsandboxed.includes(info.id)) unsandboxed.push(info.id);
-          needsDeclaration.push({ id: info.id, label });
+          needsDeclaration.push({ id: info.id, label, name });
         }
 
         // Remote URLs travel as-is; local (and already embedded) sources are
@@ -723,10 +723,10 @@ export async function loadExtensions(
 
   // Extensions that only load unsandboxed error out unless the editor is allowed
   // to run them unsandboxed (or the project is packaged), so say so up front.
-  for (const { id, label } of needsDeclaration) {
+  for (const { id, label, name } of needsDeclaration) {
     if (declared.has(id) || declared.has(label)) continue;
     warnings.push(
-      `extension ${label} (id "${id}") requires unsandboxed mode; allow it to run ` +
+      `extension ${name} (id "${id}") requires unsandboxed mode; allow it to run ` +
         `unsandboxed when opening the project in PenguinMod (or add "${id}" to ` +
         "project.unsandboxed in fx.yml once you trust it)",
     );

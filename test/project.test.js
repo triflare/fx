@@ -610,6 +610,64 @@ test("decompile restores embedded extensions into fx.yml", () => {
   assert.match(project.extensionURLs.signals, /^data:text\/javascript;base64,/);
 });
 
+test("decompile leaves remote extensions to --fetch-extensions", async () => {
+  const dir = tmp();
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "text/javascript");
+    res.end(SIGNALS_EXT);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  try {
+    const url = `http://127.0.0.1:${port}/signals.js`;
+    write(
+      path.join(dir, "fx.yml"),
+      `project:\n  name: "Cat"\n  extensions:\n    - "${url}"\n`,
+    );
+    write(
+      path.join(dir, "main.tfx"),
+      'sprite "S" { when greenFlag { signals.send("hi"); } }',
+    );
+    const archive = path.join(dir, "out.pmp");
+    await execFileAsync(process.execPath, [bin, "b", "-o", archive], {
+      cwd: dir,
+    });
+
+    // Without the flag the URL is still recorded, but nothing is fetched.
+    const skippedOutput = path.join(dir, "skipped", "main.tfx");
+    fs.mkdirSync(path.dirname(skippedOutput), { recursive: true });
+    const skipped = await execFileAsync(
+      process.execPath,
+      [bin, "d", archive, "-o", skippedOutput],
+      { cwd: dir },
+    );
+    assert.match(skipped.stderr, /remote URL/);
+    assert.match(skipped.stderr, /--fetch-extensions/);
+    assert.match(
+      fs.readFileSync(skippedOutput, "utf8"),
+      /unsupported block signals_send/,
+    );
+    assert.match(
+      fs.readFileSync(path.join(dir, "skipped", "fx.yml"), "utf8"),
+      new RegExp(`http://127\\.0\\.0\\.1:${port}/signals\\.js`),
+    );
+
+    const fetchedOutput = path.join(dir, "fetched", "main.tfx");
+    fs.mkdirSync(path.dirname(fetchedOutput), { recursive: true });
+    await execFileAsync(
+      process.execPath,
+      [bin, "d", archive, "-o", fetchedOutput, "--fetch-extensions"],
+      { cwd: dir },
+    );
+    assert.match(
+      fs.readFileSync(fetchedOutput, "utf8"),
+      /signals\.send\("hi"\);/,
+    );
+  } finally {
+    server.close();
+  }
+});
+
 test("package.json exposes the fx executable", () => {
   const pkg = JSON.parse(
     fs.readFileSync(path.join(root, "package.json"), "utf8"),

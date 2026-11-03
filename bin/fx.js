@@ -3,7 +3,8 @@
  * Triflare Fx command line interface.
  *
  *   fx build [input.tfx | dir] [-o out.pmp] [--no-config]   (alias: b)
- *   fx decompile <input.pmp> [-o out.tfx] [--assets <dir>]  (alias: d)
+ *   fx decompile <input.pmp> [-o out.tfx] [--assets <dir>] [--fetch-extensions]
+ *                                                          (alias: d)
  *   fx check [input.tfx | dir]                              (alias: c)
  *   fx catalog [dir] [--json]                              (alias: l)
  *   fx init [dir]                                          (alias: i)
@@ -65,6 +66,7 @@ function parseArgs(argv) {
     "extract",
     "lan",
     "strict-port",
+    "fetch-extensions",
   ]);
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -97,7 +99,7 @@ Usage:
   ${command} build [<input${EXTENSION}>|<dir>] [-o <output.pmp>] [--no-config]
   ${command} package [<input${EXTENSION}>|<input.pmp>|<dir>] [-o <output>] [--target <target>] [--extract]
   ${command} dev [<input${EXTENSION}>|<dir>] [--host [host]] [--lan] [--port <port>] [--strict-port]
-  ${command} decompile <input.pmp> [-o <output${EXTENSION}>] [--assets <dir>]
+  ${command} decompile <input.pmp> [-o <output${EXTENSION}>] [--assets <dir>] [--fetch-extensions]
   ${command} check [<input${EXTENSION}>|<dir>]
   ${command} catalog [<dir>] [--json]
   ${command} init [dir]
@@ -135,6 +137,7 @@ Options:
   -o, --output    Output file path
   --no-config     Ignore ${configFilename(product)}
   --assets <dir>  Extract project assets into <dir> when decompiling
+  --fetch-extensions  Load remote (http/https) extensions when decompiling
   --target <t>    Packaging target (html, zip, windows, macos, linux, …)
   --extract       Unzip a packaged desktop/zip archive
   --host [host]   Dev server host; with no value listen on all interfaces
@@ -522,9 +525,11 @@ function extensionFileStem(id) {
  *
  * @param {object} project parsed project.json
  * @param {string|null} outDir directory that receives the config and extension files
+ * @param {{fetchRemote?: boolean}} [options] `fetchRemote` loads plain URLs
+ *   instead of skipping them, which costs a network request per extension.
  * @returns {{entries: string[], loadEntries: string[], files: string[], warnings: string[]}}
  */
-function restoreExtensions(project, outDir) {
+function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
   const result = { entries: [], loadEntries: [], files: [], warnings: [] };
   const urls = project && project.extensionURLs;
   if (!urls || typeof urls !== "object") return result;
@@ -535,7 +540,13 @@ function restoreExtensions(project, outDir) {
     if (!uri) continue;
     if (/^https?:\/\//i.test(uri)) {
       result.entries.push(uri);
-      result.loadEntries.push(uri);
+      if (fetchRemote) result.loadEntries.push(uri);
+      else
+        result.warnings.push(
+          `extension ${id} points at a remote URL (${truncate(uri, 48)}); ` +
+            "not fetching it, so its blocks stay unsupported — pass " +
+            "--fetch-extensions to load it",
+        );
       continue;
     }
     if (!/^data:/i.test(uri)) {
@@ -616,7 +627,9 @@ async function cmdDecompile(args) {
 
   const output = args.flags.o || args.flags.output;
   const outDir = output ? path.dirname(path.resolve(output)) : null;
-  const restored = restoreExtensions(project, outDir);
+  const restored = restoreExtensions(project, outDir, {
+    fetchRemote: Boolean(args.flags["fetch-extensions"]),
+  });
   for (const warning of restored.warnings)
     process.stderr.write(`warning: ${warning}\n`);
 
