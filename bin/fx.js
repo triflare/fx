@@ -642,11 +642,12 @@ function restoreExtensions(project, outDir, { fetchRemote = false } = {}) {
       // `wx` fails instead of following a path that appeared in the meantime.
       fs.writeFileSync(file, source, { flag: "wx" });
     } catch (err) {
-      if (err.code !== "EEXIST") throw err;
       result.loadEntries.push(uri);
       result.warnings.push(
-        `extension ${id} not written to ${relative}: the path appeared while ` +
-          "decompiling; delete or rename it to restore the extension",
+        `extension ${id} not written to ${relative}: ` +
+          (err.code === "EEXIST"
+            ? "the path appeared while decompiling; delete or rename it to restore the extension"
+            : `${err.code || err.message}`),
       );
       continue;
     }
