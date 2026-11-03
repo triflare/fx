@@ -17,3 +17,10 @@ updates:
       - "type: chore"
       - "ci: github actions"
       - "area: dependencies"
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "type: chore"
+      - "area: dependencies"

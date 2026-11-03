@@ -15,6 +15,17 @@ export { decompile, decompileProject } from "./decompiler.js";
 export { zipSync, unzipSync, md5hex, imageSize, wavInfo } from "./sb3.js";
 export { loadExtensions } from "./extensions.js";
 export { readSprite, spriteArchive, spriteSource } from "./sprite.js";
+export { packageProject, loadPackager, packagerDistPath } from "./packager.js";
+export {
+  applyCustomHtml,
+  extractArchive,
+  packageExtension,
+  packageOutputPath,
+  packageSignature,
+  resolvePackageConfig,
+  slugify,
+} from "./package.js";
+export { formatDevUrls, injectDevClient, startDevServer } from "./dev.js";
 export * from "./catalog.js";
 export * from "./config.js";
 export { FxError, LexError, ParseError, CompileError } from "./errors.js";

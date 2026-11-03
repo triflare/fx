@@ -13,7 +13,10 @@ export default [
     ignores: [
       "**/node_modules/**",
       "reference/**",
+      "vendor/**",
       ".freebuff/**",
+      // Scratch packager probes used while developing packaging support
+      ".smoke/**",
       "**/build/**",
       "coverage/**",
       "**/dist/**",

@@ -4,8 +4,14 @@ node_modules/
 # Vendored PenguinMod sources (VM / GUI / gallery / packager) kept for reference
 reference/
 
+# Vendored PenguinMod Packager submodule and generated distribution
+vendor/
+
 # OpenCode tool metadata
 .freebuff/
+
+# Scratch packager probes used while developing packaging support
+.smoke/
 
 # Compiled Triflare Fx projects (*.pmp) and their extracted assets
 **/build/

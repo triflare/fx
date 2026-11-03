@@ -53,45 +53,13 @@ $ fx build
   extensions: (none)
 ```
 
-### Splitting a sprite across files
-
-Sprite fragments are disabled by default. Enable them in `fx.yml`:
-
-```yaml
-fx:
-  partialSprites: true
-```
-
-Then keep one base declaration and add as many fragments as you like:
-
-```tfx
-// src/cat.tfx
-sprite "Cat" {
-    costumes: { cat: "../assets/cat.svg" };
-}
-
-// src/cat/scripts.tfx
-partial sprite "Cat" {
-    when greenFlag { looks.show(); }
-}
-
-// src/cat/state.tfx
-partial sprite "Cat" {
-    let lives = 3;
-}
-```
-
-Build the directory (`fx build src` or `fx build`) as usual. Base content is
-merged first, followed by fragments in build order. A sprite may also consist
-only of fragments, but two plain `sprite "Cat"` declarations are still an error.
-Duplicate local variables, lists, and functions across fragments are reported
-against the fragment file that redeclares them.
-
 ## Installation
 
 **Requirements:**
 
 - At least Node.js v24.
+
+Packaging downloads the PenguinMod runtime and, for desktop targets, an Electron or NW.js runtime on first use. Those downloads are cached locally.
 
 To use `fx` raw instead of `npx @triflare/fx`, install Triflare Fx globally:
 

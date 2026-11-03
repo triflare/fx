@@ -11,8 +11,11 @@ import {
   findConfigPath,
   loadConfigFrom,
   normalizeFx,
+  normalizePackage,
+  normalizePackageTarget,
   DEFAULT_PROJECT,
   DEFAULT_FX,
+  DEFAULT_PACKAGE,
   CONFIG_MAGIC,
 } from "../src/config.js";
 
@@ -60,6 +63,86 @@ test("rejects a non-mapping fx section", () => {
     () => parseConfig("fx: true\n"),
     /must contain an "fx" mapping/,
   );
+});
+
+test("reads packaging defaults and maps friendly target aliases", () => {
+  const defaults = parseConfig("project:\n  name: Demo\n").package;
+  assert.equal(defaults.target, DEFAULT_PACKAGE.target);
+  assert.deepEqual(defaults.custom, { js: "", css: "", html: "" });
+  assert.deepEqual(defaults.options, {});
+  assert.equal(normalizePackageTarget("windows"), "electron-win64");
+  assert.equal(normalizePackageTarget("mac"), "electron-mac");
+  assert.equal(normalizePackageTarget("linux"), "electron-linux64");
+  assert.equal(normalizePackageTarget("zip-one-asset"), "zip-one-asset");
+  assert.equal(normalizePackageTarget("HTML"), "html");
+});
+
+test("normalizes package settings and keeps file references", () => {
+  const { package: pkg } = parseConfig(`
+package:
+  target: windows
+  output: dist/game.zip
+  extract: true
+  name: "My Game"
+  version: "2.0.0"
+  icon: assets/icon.png
+  fps: 60
+  width: 1280
+  height: 720
+  turbo: true
+  custom:
+    js: "console.log('hi')"
+    css:
+      file: src/custom.css
+    html:
+      file: src/custom.html
+  options:
+    autoplay: true
+    app:
+      windowTitle: "Raw title"
+`);
+  assert.equal(pkg.target, "electron-win64");
+  assert.equal(pkg.output, "dist/game.zip");
+  assert.equal(pkg.extract, true);
+  assert.equal(pkg.name, "My Game");
+  assert.equal(pkg.version, "2.0.0");
+  assert.equal(pkg.icon, "assets/icon.png");
+  assert.deepEqual(pkg.options, {
+    framerate: 60,
+    stageWidth: 1280,
+    stageHeight: 720,
+    turbo: true,
+    autoplay: true,
+    app: { windowTitle: "Raw title" },
+  });
+  assert.equal(pkg.custom.js, "console.log('hi')");
+  assert.deepEqual(pkg.custom.css, { file: "src/custom.css" });
+  assert.deepEqual(pkg.custom.html, { file: "src/custom.html" });
+});
+
+test("rejects unknown package settings and invalid custom values", () => {
+  assert.throws(
+    () => normalizePackage({ outpt: "typo.html" }),
+    /unknown package setting/,
+  );
+  assert.throws(
+    () => normalizePackage({ custom: { js: 42 } }),
+    /must be text or \{ file: "<path>" \}/,
+  );
+  assert.throws(
+    () => normalizePackage({ custom: { script: "x" } }),
+    /unknown package\.custom setting/,
+  );
+  assert.throws(
+    () => normalizePackage({ icon: true }),
+    /package\.icon must be a file path/,
+  );
+});
+
+test("loadConfigFrom includes packaging defaults when no file exists", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-empty-pkg-"));
+  const { package: pkg } = loadConfigFrom(dir);
+  assert.deepEqual(pkg, normalizePackage({}));
 });
 
 test("normalizes a single unsandboxed extension to a list", () => {

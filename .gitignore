@@ -158,3 +158,9 @@ vite.config.ts.timestamp-*
 
 # Cloned sources used for reference only (PenguinMod VM/GUI/gallery/packager)
 reference/
+
+# Generated PenguinMod Packager distribution (rebuilt by `npm run build:packager`)
+vendor/pm-packager-dist/
+
+# Scratch packager probes used while developing packaging support
+.smoke/

@@ -1,0 +1,3 @@
+[submodule "vendor/pm-packager"]
+	path = vendor/pm-packager
+	url = https://github.com/PenguinMod/PenguinMod-Packager.git

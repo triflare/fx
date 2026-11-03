@@ -10,6 +10,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import process from "node:process";
 import { build } from "../src/build.js";
 import { parse } from "../src/parser.js";
@@ -21,11 +22,21 @@ import {
   addProjectExtension,
   findConfigPath,
   loadConfigFrom,
+  normalizePackageTarget,
   readProjectExtensions,
   removeProjectExtension,
 } from "../src/config.js";
 import { loadExtensions } from "../src/extensions.js";
 import { readSprite, spriteArchive, spriteSource } from "../src/sprite.js";
+import { packageProject } from "../src/packager.js";
+import {
+  extractArchive,
+  packageOutputPath,
+  packageSignature,
+  resolvePackageConfig,
+  slugify,
+} from "../src/package.js";
+import { startDevServer } from "../src/dev.js";
 import {
   brandText,
   configFilename,
@@ -50,6 +61,9 @@ function parseArgs(argv) {
     "version",
     "v",
     "force",
+    "extract",
+    "lan",
+    "strict-port",
   ]);
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -80,6 +94,8 @@ function usage(stream = process.stdout) {
 
 Usage:
   ${command} build [<input${EXTENSION}>|<dir>] [-o <output.pmp>] [--no-config]
+  ${command} package [<input${EXTENSION}>|<input.pmp>|<dir>] [-o <output>] [--target <target>] [--extract]
+  ${command} dev [<input${EXTENSION}>|<dir>] [--host [host]] [--lan] [--port <port>] [--strict-port]
   ${command} decompile <input.pmp> [-o <output${EXTENSION}>] [--assets <dir>]
   ${command} check [<input${EXTENSION}>|<dir>]
   ${command} catalog [<dir>] [--json]
@@ -88,6 +104,9 @@ Usage:
 Commands:
   build     (b)  Compile a source file, or every ${EXTENSION} file in a directory
                  (defaults to the working directory) into one .pmp.
+  package   (p)  Package a source, project archive or directory into HTML or a ZIP
+                 (Windows/macOS/Linux desktop builds use Electron).
+  dev            Serve the packaged HTML and reload when the output changes.
   decompile (d)  Convert a .pmp back into ${product.name} source.
   check     (c)  Parse a file (or every ${EXTENSION} file in a directory) for errors.
   catalog   (l)  List ${product.name} blocks, including those from ${configFilename(product)}
@@ -114,6 +133,12 @@ Options:
   -o, --output    Output file path
   --no-config     Ignore ${configFilename(product)}
   --assets <dir>  Extract project assets into <dir> when decompiling
+  --target <t>    Packaging target (html, zip, windows, macos, linux, …)
+  --extract       Unzip a packaged desktop/zip archive
+  --host [host]   Dev server host; with no value listen on all interfaces
+  --lan           Alias for listening on all interfaces
+  --port <port>   Dev server port (default 3000)
+  --strict-port   Fail instead of picking the next free dev port
   --json          Machine readable output (catalog)
   -v, --version   Print the version
 `;
@@ -122,6 +147,7 @@ Options:
 /** Long command name -> one-letter alias. */
 const COMMAND_ALIASES = {
   b: "build",
+  p: "package",
   d: "decompile",
   c: "check",
   l: "catalog",
@@ -150,17 +176,6 @@ async function loadProjectExtensions(dir, config, { localFileWarning } = {}) {
   for (const warning of loaded.warnings)
     process.stderr.write(`warning: ${warning}\n`);
   return { catalog, extensionUrls, unsandboxed };
-}
-
-/** Turn a project name into a filesystem-friendly slug. */
-function slugify(name) {
-  return (
-    String(name || "project")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "project"
-  );
 }
 
 /** Split a positional build/check argument into `{file}` or `{dir}`. */
@@ -231,6 +246,201 @@ async function cmdBuild(args) {
           "(must be allowed to run unsandboxed in the editor)\n"
         : ""),
   );
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let i = 1; value >= 1024 && i < units.length; i += 1) {
+    value /= 1024;
+    unit = units[i];
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
+}
+
+/** Read a `.pmp` directly, or build `.tfx`/directory sources into one. */
+async function readPackagingSource(target, loaded) {
+  const searchDir = target.file ? path.dirname(target.file) : target.dir;
+  if (target.file && path.extname(target.file).toLowerCase() === ".pmp") {
+    return {
+      sb3: fs.readFileSync(target.file),
+      projectName: path.basename(target.file, path.extname(target.file)),
+      searchDir,
+    };
+  }
+
+  const extBase = loaded.path ? path.dirname(loaded.path) : searchDir;
+  const { catalog, extensionUrls } = await loadProjectExtensions(
+    extBase,
+    loaded.project || {},
+  );
+  const result = build({
+    ...target,
+    projectConfig: loaded.project,
+    fxConfig: loaded.fx,
+    catalog,
+    extensionUrls,
+    useConfigFile: false,
+  });
+  return {
+    sb3: result.sb3,
+    projectName: result.config.name,
+    searchDir,
+  };
+}
+
+async function cmdPackage(args) {
+  const target = resolveInput(args._[0]);
+  const loaded = args.flags["no-config"]
+    ? { project: null, fx: null, package: null, path: null }
+    : loadConfigFrom(target.file ? path.dirname(target.file) : target.dir);
+  const source = await readPackagingSource(target, loaded);
+  const baseDir = loaded.path ? path.dirname(loaded.path) : source.searchDir;
+  const pkg = resolvePackageConfig(loaded.package, {
+    baseDir,
+    projectName: source.projectName,
+  });
+
+  if (args.flags.target !== undefined) {
+    if (typeof args.flags.target !== "string") fail("--target needs a value");
+    pkg.target = normalizePackageTarget(args.flags.target);
+  }
+  const explicit = args.flags.o || args.flags.output;
+  if (explicit !== undefined) {
+    if (typeof explicit !== "string") fail("-o/--output needs a value");
+    pkg.output = path.resolve(explicit);
+  }
+  const extract = Boolean(args.flags.extract) || pkg.extract;
+  if (extract && pkg.target === "html")
+    fail("--extract only applies to zip and desktop targets");
+
+  const output = packageOutputPath({
+    target: pkg.target,
+    output: pkg.output,
+    name: pkg.name || source.projectName,
+    dir: baseDir,
+  });
+  const result = await packageProject({
+    sb3: source.sb3,
+    projectName: source.projectName,
+    packageConfig: pkg,
+  });
+
+  fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
+  fs.writeFileSync(output, result.data);
+  log.success(`Packaged ${output}`);
+  process.stdout.write(
+    `  target:     ${result.target}\n` +
+      `  type:       ${result.type}\n` +
+      `  size:       ${formatBytes(result.data.length)}\n`,
+  );
+
+  if (extract) {
+    const extension = path.extname(output);
+    const extractDir = path.join(
+      path.dirname(output),
+      path.basename(output, extension),
+    );
+    const files = await extractArchive(result.data, extractDir);
+    log.success(`Extracted ${files.length} file(s) to ${extractDir}`);
+  }
+}
+
+async function cmdDev(args) {
+  const target = resolveInput(args._[0]);
+  if (target.file && path.extname(target.file).toLowerCase() === ".pmp")
+    fail("fx dev needs .tfx sources or a directory, not a .pmp archive");
+
+  const searchDir = target.file ? path.dirname(target.file) : target.dir;
+  const useConfigFile = !args.flags["no-config"];
+  const configPath = useConfigFile ? findConfigPath(searchDir) : null;
+  const baseDir = configPath ? path.dirname(configPath) : searchDir;
+
+  let host = "127.0.0.1";
+  if (args.flags.lan) host = "0.0.0.0";
+  else if (args.flags.host === true) host = "0.0.0.0";
+  else if (typeof args.flags.host === "string") host = args.flags.host;
+
+  if (args.flags.port === true) fail("--port needs a number");
+  const port = args.flags.port === undefined ? 3000 : Number(args.flags.port);
+
+  let lastSb3Hash = null;
+  let lastSignature = null;
+  let lastHtml = null;
+
+  const buildForDev = async () => {
+    const loaded = useConfigFile
+      ? loadConfigFrom(searchDir)
+      : { project: null, fx: null, package: null, path: null };
+    const configBase = loaded.path ? path.dirname(loaded.path) : searchDir;
+    const { catalog, extensionUrls } = await loadProjectExtensions(
+      configBase,
+      loaded.project || {},
+    );
+    const result = build({
+      ...target,
+      projectConfig: loaded.project,
+      fxConfig: loaded.fx,
+      catalog,
+      extensionUrls,
+      useConfigFile: false,
+    });
+    const pkg = resolvePackageConfig(loaded.package, {
+      baseDir: configBase,
+      projectName: result.config.name,
+    });
+    // Dev always serves HTML, no matter what the package block requests.
+    pkg.target = "html";
+
+    const signature = packageSignature(pkg);
+    const sb3Hash = crypto
+      .createHash("sha256")
+      .update(result.sb3)
+      .digest("hex");
+    if (
+      lastHtml != null &&
+      sb3Hash === lastSb3Hash &&
+      signature === lastSignature
+    )
+      return lastHtml;
+
+    const packaged = await packageProject({
+      sb3: result.sb3,
+      projectName: result.config.name,
+      packageConfig: pkg,
+    });
+    lastSb3Hash = sb3Hash;
+    lastSignature = signature;
+    lastHtml = packaged.html ?? packaged.data.toString("utf8");
+    return lastHtml;
+  };
+
+  const server = await startDevServer({
+    watchDir: baseDir,
+    build: buildForDev,
+    host,
+    port,
+    strictPort: Boolean(args.flags["strict-port"]),
+    log,
+  });
+
+  process.stdout.write(`\n  ${brandText(product.name)} dev\n`);
+  for (const url of server.localUrls) log.bullet(`Local:   ${url}`);
+  for (const url of server.networkUrls) log.bullet(`Network: ${url}`);
+  log.info("  Press Ctrl+C to stop.");
+
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    server.close().finally(() => process.exit(0));
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+
+  await server.ready;
 }
 
 function cmdCheck(args) {
@@ -347,6 +557,8 @@ function initFiles() {
   interpolation: true
 fx:
   partialSprites: false
+package:
+  target: html
 `,
     [`${sourceDirectory(product)}/main${EXTENSION}`]: `sprite "Cat" {
     costumes: {
@@ -692,6 +904,10 @@ async function main() {
   switch (command) {
     case "build":
       return cmdBuild(args);
+    case "package":
+      return cmdPackage(args);
+    case "dev":
+      return cmdDev(args);
     case "decompile":
       return cmdDecompile(args);
     case "check":
