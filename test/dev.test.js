@@ -168,6 +168,23 @@ test("dev client ignores </body> inside quoted iframe attributes", () => {
   assert.ok(out.includes('<iframe srcdoc="</iframe></body>">fallback'));
 });
 
+test("dev client ignores </body> in other start tags' attributes", () => {
+  // No real body end tag exists, so only the attribute text could match.
+  const html = '<html><body><p title="a</body>b">text</p>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("</p>"));
+  assert.ok(out.includes('<p title="a</body>b">text</p>'));
+});
+
+test("dev client ignores `<` in text before the real body end tag", () => {
+  // `1 < 2 and "unclosed` must not start a tag whose quote swallows the rest.
+  const html = '<html><body><p>1 < 2 and "unclosed </p></body></html>';
+  const out = injectDevClient(html);
+  assert.ok(out.indexOf("data-fx-dev") > out.indexOf("</p>"));
+  assert.ok(out.indexOf("data-fx-dev") < out.lastIndexOf("</body>"));
+  assert.ok(out.includes('<p>1 < 2 and "unclosed </p>'));
+});
+
 test("dev server picks the next free port unless strict", async () => {
   const dir = tmp();
   const first = await startDevServer({

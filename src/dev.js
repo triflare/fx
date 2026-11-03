@@ -109,7 +109,9 @@ function endTagEnd(html, name, from) {
   pattern.lastIndex = from;
   const match = pattern.exec(html);
   return match ? match.index + match[0].length : -1;
-} /**
+}
+
+/**
  * Find the ranges the HTML tokenizer treats as text rather than markup, so tag
  * searches cannot match text that merely looks like markup (a `</body>` inside
  * a script string, a commented-out tag, an attribute value, ...).
@@ -139,23 +141,42 @@ function nonMarkupRanges(html) {
 
     TAG_NAME_AT.lastIndex = tag;
     const match = TAG_NAME_AT.exec(html);
-    const start = startTagEnd(html, tag);
     const name = match ? match[1].toLowerCase() : "";
+    const next = html[tag + 1] ?? "";
+
+    // A bare `<` (`1 < 2`) opens no tag, so carry on just after it: scanning
+    // from here could otherwise let a stray quote in text open an attribute
+    // quote and swallow real markup that follows.
+    if (!match && next !== "/" && next !== "!" && next !== "?") {
+      i = tag + 1;
+      continue;
+    }
+
+    const end = startTagEnd(html, tag);
 
     // An unterminated tag, and `<plaintext>`, make the rest of the input text.
-    if (start === -1 || name === "plaintext") {
+    if (end === -1 || name === "plaintext") {
       ranges.push([tag, html.length]);
       textFrom = tag;
       break;
     }
 
+    // End tags and declarations have no attributes that could hide a tag.
+    if (name === "") {
+      i = end;
+      continue;
+    }
+
     if (!RAW_TEXT_TAGS.has(name)) {
-      i = start;
+      // A start tag's quoted attributes are text too, so a `</body>` inside
+      // `title="…"` cannot capture the injection.
+      ranges.push([tag, end]);
+      i = end;
       continue;
     }
 
     // A text element without its end tag also runs to end of input.
-    const close = endTagEnd(html, name, start);
+    const close = endTagEnd(html, name, end);
     if (close === -1) {
       ranges.push([tag, html.length]);
       textFrom = tag;
