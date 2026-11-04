@@ -4,15 +4,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   loadExtensions,
+  makeSandbox,
   readExtensionDataUri,
   BlockType,
   ArgumentType,
   BlockShape,
   NotchShape,
 } from "../src/extensions.js";
+
+const require = createRequire(import.meta.url);
 
 function tempExtension(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-ext-"));
@@ -59,13 +63,16 @@ test("synthesizes catalog entries with the right kinds and opcodes", async () =>
 
   assert.equal(catalog["signals.send"].opcode, "signals_send");
   assert.equal(catalog["signals.send"].kind, "command");
-  assert.deepEqual(catalog["signals.send"].inputs.MSG, { type: "string" });
+  assert.deepEqual(catalog["signals.send"].inputs.MSG, {
+    type: "string",
+    default: "hi",
+  });
   assert.equal(catalog["signals.send"].extension, "signals");
   assert.equal(catalog["signals.level"].kind, "reporter");
   assert.equal(catalog["signals.isOn"].kind, "boolean");
   assert.equal(catalog["signals.whenBang"].kind, "hat");
   assert.deepEqual(catalog["signals.whenBang"].args, [
-    { input: "WHO", type: "string" },
+    { input: "WHO", type: "string", default: "all" },
   ]);
 });
 
@@ -319,6 +326,227 @@ test("exposes PenguinMod detection to extension code", async () => {
     warnings.filter((w) => /failed/.test(w)),
     [],
   );
+});
+
+test("supports Scratch.translate.setup from generated l10n bundles", async (t) => {
+  const dir = tempExtension(`
+        Scratch.translate.setup({fr: {'Hello': 'Bonjour'}});
+        (function (Scratch) {
+            Scratch.extensions.register({
+                getInfo () {
+                    return {id: 'l10n', blocks: [
+                        {opcode: 'go', blockType: Scratch.BlockType.COMMAND, text: Scratch.translate('Hello')}
+                    ]};
+                }
+            });
+        })(Scratch);
+    `);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { catalog, ids, warnings } = await loadExtensions(["./ext.js"], {
+    baseDir: dir,
+  });
+  assert.deepEqual(
+    warnings.filter((w) => /failed/.test(w)),
+    [],
+    warnings.join("\n"),
+  );
+  assert.deepEqual(ids, ["l10n"]);
+  assert.equal(catalog["l10n.go"].opcode, "l10n_go");
+});
+
+test("carries extension argument defaults into the catalog", async (t) => {
+  const dir = tempExtension(`
+        (function (Scratch) {
+            Scratch.extensions.register({
+                getInfo () {
+                    return {id: 'defaults', blocks: [
+                        {opcode: 'go', blockType: Scratch.BlockType.COMMAND, text: 'go [N] [T] [A]', arguments: {
+                            N: {type: Scratch.ArgumentType.NOTE, defaultValue: 60},
+                            T: {type: Scratch.ArgumentType.STRING, defaultValue: 'hi'},
+                            A: {type: Scratch.ArgumentType.BOOLEAN}
+                        }},
+                        {opcode: 'receive', blockType: Scratch.BlockType.HAT, text: 'receive [WHO]', arguments: {
+                            WHO: {type: Scratch.ArgumentType.STRING, defaultValue: 'all'}
+                        }}
+                    ]};
+                }
+            });
+        })(Scratch);
+    `);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { catalog } = await loadExtensions(["./ext.js"], { baseDir: dir });
+  assert.deepEqual(catalog["defaults.go"].inputs.N, {
+    type: "number",
+    default: 60,
+  });
+  assert.deepEqual(catalog["defaults.go"].inputs.T, {
+    type: "string",
+    default: "hi",
+  });
+  assert.deepEqual(catalog["defaults.go"].inputs.A, { type: "boolean" });
+  assert.deepEqual(catalog["defaults.receive"].args, [
+    { input: "WHO", type: "string", default: "all" },
+  ]);
+});
+
+test("shim API matches the scratch-vm extension API", async () => {
+  const vmApi = require("scratch-vm/src/extension-support/tw-extension-api-common");
+  const vmCast = require("scratch-vm/src/util/cast");
+  const vmColor = require("scratch-vm/src/util/color");
+  const { Scratch: shim } = makeSandbox([]);
+
+  for (const name of [
+    "ArgumentAlignment",
+    "ArgumentType",
+    "BlockShape",
+    "BlockType",
+    "NotchShape",
+    "TargetType",
+  ]) {
+    assert.deepEqual(shim[name], vmApi[name], `Scratch.${name}`);
+  }
+  for (const name of Object.keys(vmApi)) {
+    assert.ok(name in shim, `Scratch.${name} missing from the sandbox`);
+  }
+
+  const members = (value) =>
+    Object.getOwnPropertyNames(value)
+      .filter((name) => !["length", "name", "prototype"].includes(name))
+      .sort();
+  assert.deepEqual(members(shim.Cast), members(vmCast), "Scratch.Cast");
+  assert.deepEqual(members(shim.Color), members(vmColor), "Scratch.Color");
+
+  const samples = [
+    true,
+    false,
+    0,
+    1,
+    -0,
+    5.5,
+    NaN,
+    Infinity,
+    "",
+    " ",
+    "0",
+    "1",
+    "false",
+    "FALSE",
+    "true",
+    "abc",
+    " 12 ",
+    null,
+    undefined,
+    [1],
+    {},
+  ];
+  for (const value of samples) {
+    const label = `Cast on ${JSON.stringify(value) ?? String(value)}`;
+    assert.equal(shim.Cast.toBoolean(value), vmCast.toBoolean(value), label);
+    assert.equal(shim.Cast.toNumber(value), vmCast.toNumber(value), label);
+    assert.equal(
+      shim.Cast.isWhiteSpace(value),
+      vmCast.isWhiteSpace(value),
+      label,
+    );
+    assert.equal(shim.Cast.isInt(value), vmCast.isInt(value), label);
+    assert.deepEqual(
+      shim.Cast.toRgbColorObject(value),
+      vmCast.toRgbColorObject(value),
+      label,
+    );
+    assert.deepEqual(
+      shim.Cast.toRgbColorList(value),
+      vmCast.toRgbColorList(value),
+      label,
+    );
+  }
+
+  for (const [a, b] of [
+    ["a", "B"],
+    [2, 10],
+    ["2", "10"],
+    [null, 0],
+    ["0", ""],
+    [true, "TRUE"],
+    [Infinity, Infinity],
+  ]) {
+    const label = `Cast.compare(${String(a)}, ${String(b)})`;
+    assert.equal(
+      Math.sign(shim.Cast.compare(a, b)),
+      Math.sign(vmCast.compare(a, b)),
+      label,
+    );
+  }
+
+  for (const [index, length, acceptAll] of [
+    [1, 3, false],
+    ["last", 3, false],
+    ["last", 0, false],
+    ["all", 3, true],
+    ["all", 3, false],
+    ["random", 0, false],
+    [9, 3, false],
+    ["2", 3, false],
+  ]) {
+    assert.equal(
+      shim.Cast.toListIndex(index, length, acceptAll),
+      vmCast.toListIndex(index, length, acceptAll),
+      `Cast.toListIndex(${String(index)})`,
+    );
+  }
+
+  assert.equal(shim.Color.RGB_BLACK.r, vmColor.RGB_BLACK.r);
+  assert.equal(shim.Color.RGB_WHITE.b, vmColor.RGB_WHITE.b);
+  for (const decimal of [0, 0x336699, -1, 0xffffff]) {
+    assert.equal(
+      shim.Color.decimalToHex(decimal),
+      vmColor.decimalToHex(decimal),
+    );
+    assert.deepEqual(
+      shim.Color.decimalToRgb(decimal),
+      vmColor.decimalToRgb(decimal),
+    );
+  }
+  for (const hex of ["#336699", "336699", "#f00", "nope"]) {
+    assert.deepEqual(shim.Color.hexToRgb(hex), vmColor.hexToRgb(hex));
+  }
+  for (const rgb of [
+    { r: 0, g: 0, b: 0 },
+    { r: 51, g: 102, b: 153 },
+  ]) {
+    assert.equal(shim.Color.rgbToHex(rgb), vmColor.rgbToHex(rgb));
+    assert.equal(shim.Color.rgbToDecimal(rgb), vmColor.rgbToDecimal(rgb));
+    assert.deepEqual(shim.Color.rgbToHsv(rgb), vmColor.rgbToHsv(rgb));
+  }
+  for (const hsv of [
+    { h: 0, s: 0, v: 0 },
+    { h: 210, s: 0.5, v: 0.6 },
+  ]) {
+    assert.deepEqual(shim.Color.hsvToRgb(hsv), vmColor.hsvToRgb(hsv));
+  }
+  assert.deepEqual(
+    shim.Color.mixRgb({ r: 0, g: 0, b: 0 }, { r: 255, g: 255, b: 255 }, 0.5),
+    vmColor.mixRgb({ r: 0, g: 0, b: 0 }, { r: 255, g: 255, b: 255 }, 0.5),
+  );
+
+  assert.equal(typeof shim.translate, "function");
+  assert.equal(typeof shim.translate.setup, "function");
+  assert.equal(shim.translate.language, "en");
+  assert.equal(shim.translate("Hello"), "Hello");
+  assert.equal(shim.translate({ default: "Hi" }), "Hi");
+  assert.throws(() => shim.translate(1), /unsupported data type/);
+  shim.translate.setup({ fr: { Hello: "Bonjour" } });
+
+  for (const name of [
+    "importModule",
+    "fetch",
+    "dataURL",
+    "blob",
+    "evalAndReturn",
+  ]) {
+    assert.equal(typeof shim.external[name], "function", `external.${name}`);
+    await assert.rejects(shim.external[name]("https://example.test/x.js"));
+  }
 });
 
 test("warns on HTTP errors for remote extensions", async () => {

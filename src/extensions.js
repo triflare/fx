@@ -165,18 +165,191 @@ export const Color = {
   hexToDecimal(hex) {
     return Color.rgbToDecimal(Color.hexToRgb(hex));
   },
+  hsvToRgb(hsv) {
+    let h = hsv.h % 360;
+    if (h < 0) h += 360;
+    const s = Math.max(0, Math.min(hsv.s, 1));
+    const v = Math.max(0, Math.min(hsv.v, 1));
+
+    const i = Math.floor(h / 60);
+    const f = h / 60 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - s * f);
+    const t = v * (1 - s * (1 - f));
+
+    let r;
+    let g;
+    let b;
+    switch (i) {
+      default:
+      case 0:
+        r = v;
+        g = t;
+        b = p;
+        break;
+      case 1:
+        r = q;
+        g = v;
+        b = p;
+        break;
+      case 2:
+        r = p;
+        g = v;
+        b = t;
+        break;
+      case 3:
+        r = p;
+        g = q;
+        b = v;
+        break;
+      case 4:
+        r = t;
+        g = p;
+        b = v;
+        break;
+      case 5:
+        r = v;
+        g = p;
+        b = q;
+        break;
+    }
+
+    return {
+      r: Math.floor(r * 255),
+      g: Math.floor(g * 255),
+      b: Math.floor(b * 255),
+    };
+  },
+  rgbToHsv(rgb) {
+    const r = rgb.r / 255;
+    const g = rgb.g / 255;
+    const b = rgb.b / 255;
+    const x = Math.min(Math.min(r, g), b);
+    const v = Math.max(Math.max(r, g), b);
+
+    // For greys hue is arbitrarily reported as zero.
+    let h = 0;
+    let s = 0;
+    if (x !== v) {
+      const f = r === x ? g - b : g === x ? b - r : r - g;
+      const i = r === x ? 3 : g === x ? 5 : 1;
+      h = ((i - f / (v - x)) * 60) % 360;
+      s = (v - x) / v;
+    }
+
+    return { h: h, s: s, v: v };
+  },
+  mixRgb(rgb0, rgb1, fraction1) {
+    if (fraction1 <= 0) return rgb0;
+    if (fraction1 >= 1) return rgb1;
+    const fraction0 = 1 - fraction1;
+    return {
+      r: fraction0 * rgb0.r + fraction1 * rgb1.r,
+      g: fraction0 * rgb0.g + fraction1 * rgb1.g,
+      b: fraction0 * rgb0.b + fraction1 * rgb1.b,
+    };
+  },
 };
 
-/** `Scratch.Cast`. */
+/**
+ * `Scratch.Cast` (scratch-vm's `util/cast`, as exposed to extensions).
+ *
+ * Each member mirrors the VM's implementation, including Scratch's own
+ * coercion rules — `Cast.toBoolean("0")` is false, `Cast.compare` is
+ * case-insensitive for text and numeric otherwise.
+ */
 export const Cast = {
   toString: (value) => String(value),
   toNumber: (value) => {
+    if (typeof value === "number") return Number.isNaN(value) ? 0 : value;
     const n = Number(value);
     return Number.isNaN(n) ? 0 : n;
   },
-  toBoolean: (value) =>
-    typeof value === "boolean" ? value : String(value) === "true",
-  toList: (value) => (Array.isArray(value) ? value : [value]),
+  toBoolean: (value) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      // These exact strings are false in Scratch; everything else is true.
+      if (value === "" || value === "0" || value.toLowerCase() === "false")
+        return false;
+      return true;
+    }
+    return Boolean(value);
+  },
+  /** 0 when equal, negative when `a` sorts first, positive otherwise. */
+  compare: (a, b) => {
+    // Scratch does not treat "0", "\t" or strings containing them as zero.
+    const isNotActuallyZero = (value) => {
+      if (typeof value !== "string") return false;
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        if (code === 48 || code === 9) return false;
+      }
+      return true;
+    };
+    let n1 = Number(a);
+    let n2 = Number(b);
+    if (n1 === 0 && isNotActuallyZero(a)) n1 = NaN;
+    else if (n2 === 0 && isNotActuallyZero(b)) n2 = NaN;
+    if (Number.isNaN(n1) || Number.isNaN(n2)) {
+      const s1 = String(a).toLowerCase();
+      const s2 = String(b).toLowerCase();
+      if (s1 < s2) return -1;
+      if (s1 > s2) return 1;
+      return 0;
+    }
+    if (
+      (n1 === Infinity && n2 === Infinity) ||
+      (n1 === -Infinity && n2 === -Infinity)
+    )
+      return 0;
+    return n1 - n2;
+  },
+  toRgbColorList: (value) => {
+    const color = Cast.toRgbColorObject(value);
+    return [color.r, color.g, color.b];
+  },
+  toRgbColorObject: (value) => {
+    let color;
+    if (typeof value === "object") value += "";
+    if (typeof value === "string" && value.substring(0, 1) === "#") {
+      color = Color.hexToRgb(value);
+      // A string that only looks like a hex colour casts to black.
+      if (!color) color = { r: 0, g: 0, b: 0, a: 255 };
+    } else {
+      color = Color.decimalToRgb(Cast.toNumber(value));
+    }
+    return color;
+  },
+  isWhiteSpace: (value) =>
+    value === null || (typeof value === "string" && value.trim().length === 0),
+  isInt: (value) => {
+    if (typeof value === "number") {
+      if (Number.isNaN(value)) return true;
+      return value === Math.floor(value);
+    }
+    if (typeof value === "boolean") return true;
+    if (typeof value === "string") return value.indexOf(".") < 0;
+    return false;
+  },
+  get LIST_INVALID() {
+    return "INVALID";
+  },
+  get LIST_ALL() {
+    return "ALL";
+  },
+  toListIndex: (index, length, acceptAll) => {
+    if (typeof index !== "number") {
+      if (index === "all") return acceptAll ? Cast.LIST_ALL : Cast.LIST_INVALID;
+      if (index === "last") return length > 0 ? length : Cast.LIST_INVALID;
+      if (index === "random" || index === "any")
+        return length > 0
+          ? 1 + Math.floor(Math.random() * length)
+          : Cast.LIST_INVALID;
+    }
+    index = Math.floor(Cast.toNumber(index));
+    if (index < 1 || index > length) return Cast.LIST_INVALID;
+    return index;
+  },
 };
 
 // -------------------------------------------------------------- translation
@@ -184,23 +357,35 @@ export const Cast = {
 /**
  * Map a `Scratch.ArgumentType` onto a Triflare Fx input descriptor.
  * @param {object} arg
- * @returns {{type: string}}
+ * @returns {{type: string, default?: string|number}}
  */
 function argumentSpec(arg) {
   const type = arg && arg.type;
+  let spec;
   switch (type) {
     case ArgumentType.BOOLEAN:
-      return { type: "boolean" };
-    case ArgumentType.NUMBER:
-      return { type: "number" };
+      spec = { type: "boolean" };
+      break;
     case ArgumentType.ANGLE:
-      return { type: "angle" };
+      spec = { type: "angle" };
+      break;
     case ArgumentType.COLOR:
-      return { type: "color" };
-    // Matrix, note, costume, backdrop, sound and string all travel as text.
+      spec = { type: "color" };
+      break;
+    // A note is a MIDI number, so it takes numeric input like `NUMBER`.
+    case ArgumentType.NOTE:
+    case ArgumentType.NUMBER:
+      spec = { type: "number" };
+      break;
+    // Matrix, costume, sound, PM menus and plain strings all travel as text.
     default:
-      return { type: "string" };
+      spec = { type: "string" };
   }
+  // Extensions declare the value a call falls back to when it omits the arg.
+  if (arg && arg.defaultValue !== undefined && arg.defaultValue !== null) {
+    spec.default = arg.defaultValue;
+  }
+  return spec;
 }
 
 /**
@@ -270,10 +455,14 @@ function registerInfo(catalog, info, sourceName) {
       extension: id,
     };
     if (kind === "hat") {
-      entry.args = Object.entries(block.arguments || {}).map(([name, arg]) => ({
-        input: name,
-        type: argumentSpec(arg).type,
-      }));
+      entry.args = Object.entries(block.arguments || {}).map(([name, arg]) => {
+        const spec = argumentSpec(arg);
+        return {
+          input: name,
+          type: spec.type,
+          ...(spec.default !== undefined ? { default: spec.default } : {}),
+        };
+      });
     } else if (
       block.blockType === BlockType.CONDITIONAL ||
       block.blockType === BlockType.LOOP
@@ -331,15 +520,20 @@ function permissive(label) {
   return proxy;
 }
 
-function makeSandbox(registered, { unsandboxed = false } = {}) {
+export function makeSandbox(registered, { unsandboxed = false } = {}) {
+  /** A function that rejects: the sandbox has no browser or network. */
+  const unavailable = (name) => () =>
+    Promise.reject(new Error(`${name} is not available while compiling`));
   const Scratch = {
     extensions: {
       register(extension) {
         registered.push(extension);
       },
-      // PenguinMod sets `unsandboxed: true` for unsandboxed loads and exposes
-      // `isPenguinMod`, so extensions can adapt to whichever loader runs them.
-      unsandboxed: Boolean(unsandboxed),
+      // TurboWarp documents `unsandboxed` as true when unsandboxed and
+      // undefined otherwise — never false.
+      unsandboxed: unsandboxed || undefined,
+      // PenguinMod's unsandboxed loader sets this; exposing it in both modes
+      // keeps PenguinMod-only extensions loadable here.
       isPenguinMod: true,
     },
     BlockType,
@@ -351,15 +545,31 @@ function makeSandbox(registered, { unsandboxed = false } = {}) {
     Clone,
     Color,
     Cast,
-    translate: (value) => {
-      if (typeof value === "string") return value;
-      if (
-        value &&
-        typeof value === "object" &&
-        typeof value.default === "string"
-      )
-        return value.default;
-      return value == null ? "" : String(value);
+    // tw-l10n exposes `translate(message, args)`, `translate.setup({…})` and a
+    // read-only `translate.language` on the same function. Generated l10n
+    // bundles call `setup({…})` at module scope before registering.
+    translate: Object.defineProperty(
+      Object.assign(
+        (message) => {
+          if (typeof message === "string") return message;
+          if (message && typeof message === "object") {
+            return typeof message.default === "string" ? message.default : "";
+          }
+          throw new Error("unsupported data type in translate()");
+        },
+        { setup() {} },
+      ),
+      "language",
+      { get: () => "en", enumerable: true },
+    ),
+    // `Scratch.external` loads sibling resources; the sandbox has no browser,
+    // so its entries reject instead of resolving like a module.
+    external: {
+      importModule: unavailable("Scratch.external"),
+      fetch: unavailable("Scratch.external"),
+      dataURL: unavailable("Scratch.external"),
+      blob: unavailable("Scratch.external"),
+      evalAndReturn: unavailable("Scratch.external"),
     },
     canFetch: () => Promise.resolve(false),
     fetch: () =>
