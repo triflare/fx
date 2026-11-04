@@ -8,6 +8,10 @@
   "bin": {
     "fx": "bin/fx.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/triflare/fx.git"
+  },
   "exports": {
     ".": "./src/index.js",
     "./catalog": "./src/catalog.js",
