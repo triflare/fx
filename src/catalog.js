@@ -1,21 +1,39 @@
 /**
  * Triflare Fx block catalog.
  *
- * This module is the single source of truth for how a Triflare Fx
- * `category.function(...)` call maps onto a Scratch/PenguinMod opcode: its shape
- * (command/reporter/boolean/hat), its inputs, its dropdown fields and any
- * mutation it requires. The compiler, the decompiler and the editor tooling all
- * read from here instead of hard-coding opcode tables.
+ * The single source of truth for how a `category.function(...)` call maps onto
+ * a Scratch/PenguinMod opcode: shape, inputs, dropdown fields and mutations.
+ * The compiler, the decompiler and the editor tooling all read from here.
+ *
+ * Entry conventions:
+ *   - `kind` is a command unless the entry says otherwise, so only reporters,
+ *     booleans and hats spell it out (see the default applied below).
+ *   - `inputs` maps an input name to one of the shared descriptors below.
+ *   - `fields` maps a dropdown field name to its default value.
+ *   - `args` describes a hat's parameters (`field` or `input`).
+ *   - `extension` names the providing extension for non-core opcodes.
+ *   - `dynamicNext` / `stopBlock` flag blocks with special stack behaviour.
  *
  * Input descriptors:
- *   {type: 'number'|'positive'|'whole'|'integer'|'angle'|'string'|'color'
- *          |'boolean'|'substack'|'broadcast'|'variable'|'list'}
- *   {type: 'menu', menu: <shadow opcode>, field: <field name>, default: <value>}
- *
- * Field descriptors are plain objects providing the default dropdown value.
+ *   NUMBER, STRING, BOOLEAN, ANGLE, COLOR, INTEGER, POSITIVE, WHOLE, SUBSTACK
+ *   and BROADCAST are shared `{type}` descriptors;
+ *   `{type: 'menu', menu, field, default}` wraps a dropdown shadow block;
+ *   `{type: 'variable'|'list'}` takes a variable/list reference.
  */
 
-// Common reusable menu descriptors -----------------------------------------
+// Reusable input descriptors -----------------------------------------------
+const NUMBER = { type: "number" };
+const STRING = { type: "string" };
+const BOOLEAN = { type: "boolean" };
+const ANGLE = { type: "angle" };
+const COLOR = { type: "color" };
+const INTEGER = { type: "integer" };
+const POSITIVE = { type: "positive" };
+const WHOLE = { type: "whole" };
+const SUBSTACK = { type: "substack" };
+const BROADCAST = { type: "broadcast" };
+
+// Reusable dropdown (shadow menu) descriptors -------------------------------
 const GOTO_MENU = {
   type: "menu",
   menu: "motion_goto_menu",
@@ -85,82 +103,67 @@ const OF_MENU = {
   default: "_stage_",
 };
 
-/** @type {Record<string, object>} */
-export const CATALOG = {
+const CORE_CATALOG = {
   // ---------------------------------------------------------------- motion
   "motion.moveSteps": {
     opcode: "motion_movesteps",
-    kind: "command",
-    inputs: { STEPS: { type: "number" } },
+    inputs: { STEPS: NUMBER },
   },
   "motion.turnRight": {
     opcode: "motion_turnright",
-    kind: "command",
-    inputs: { DEGREES: { type: "number" } },
+    inputs: { DEGREES: NUMBER },
   },
   "motion.turnLeft": {
     opcode: "motion_turnleft",
-    kind: "command",
-    inputs: { DEGREES: { type: "number" } },
+    inputs: { DEGREES: NUMBER },
   },
   "motion.goToXY": {
     opcode: "motion_gotoxy",
-    kind: "command",
-    inputs: { X: { type: "number" }, Y: { type: "number" } },
+    inputs: { X: NUMBER, Y: NUMBER },
   },
   "motion.goTo": {
     opcode: "motion_goto",
-    kind: "command",
     inputs: { TO: GOTO_MENU },
   },
   "motion.glideToXY": {
     opcode: "motion_glidesecstoxy",
-    kind: "command",
     inputs: {
-      SECS: { type: "number" },
-      X: { type: "number" },
-      Y: { type: "number" },
+      SECS: NUMBER,
+      X: NUMBER,
+      Y: NUMBER,
     },
   },
   "motion.glideTo": {
     opcode: "motion_glideto",
-    kind: "command",
-    inputs: { SECS: { type: "number" }, TO: GLIDE_MENU },
+    inputs: { SECS: NUMBER, TO: GLIDE_MENU },
   },
   "motion.pointInDirection": {
     opcode: "motion_pointindirection",
-    kind: "command",
-    inputs: { DIRECTION: { type: "angle" } },
+    inputs: { DIRECTION: ANGLE },
   },
   "motion.pointTowards": {
     opcode: "motion_pointtowards",
-    kind: "command",
     inputs: { TOWARDS: POINT_MENU },
   },
   "motion.changeX": {
     opcode: "motion_changexby",
-    kind: "command",
-    inputs: { DX: { type: "number" } },
+    inputs: { DX: NUMBER },
   },
   "motion.setX": {
     opcode: "motion_setx",
-    kind: "command",
-    inputs: { X: { type: "number" } },
+    inputs: { X: NUMBER },
   },
   "motion.changeY": {
     opcode: "motion_changeyby",
-    kind: "command",
-    inputs: { DY: { type: "number" } },
+    inputs: { DY: NUMBER },
   },
   "motion.setY": {
     opcode: "motion_sety",
-    kind: "command",
-    inputs: { Y: { type: "number" } },
+    inputs: { Y: NUMBER },
   },
-  "motion.ifOnEdgeBounce": { opcode: "motion_ifonedgebounce", kind: "command" },
+  "motion.ifOnEdgeBounce": { opcode: "motion_ifonedgebounce" },
   "motion.setRotationStyle": {
     opcode: "motion_setrotationstyle",
-    kind: "command",
     fields: { STYLE: "all around" },
   },
   "motion.xPosition": { opcode: "motion_xposition", kind: "reporter" },
@@ -170,79 +173,65 @@ export const CATALOG = {
   // ----------------------------------------------------------------- looks
   "looks.say": {
     opcode: "looks_say",
-    kind: "command",
-    inputs: { MESSAGE: { type: "string" } },
+    inputs: { MESSAGE: STRING },
   },
   "looks.sayForSecs": {
     opcode: "looks_sayforsecs",
-    kind: "command",
-    inputs: { MESSAGE: { type: "string" }, SECS: { type: "number" } },
+    inputs: { MESSAGE: STRING, SECS: NUMBER },
   },
   "looks.think": {
     opcode: "looks_think",
-    kind: "command",
-    inputs: { MESSAGE: { type: "string" } },
+    inputs: { MESSAGE: STRING },
   },
   "looks.thinkForSecs": {
     opcode: "looks_thinkforsecs",
-    kind: "command",
-    inputs: { MESSAGE: { type: "string" }, SECS: { type: "number" } },
+    inputs: { MESSAGE: STRING, SECS: NUMBER },
   },
   "looks.switchCostume": {
     opcode: "looks_switchcostumeto",
-    kind: "command",
     inputs: { COSTUME: COSTUME_MENU },
   },
-  "looks.nextCostume": { opcode: "looks_nextcostume", kind: "command" },
+  "looks.nextCostume": { opcode: "looks_nextcostume" },
   "looks.switchBackdrop": {
     opcode: "looks_switchbackdropto",
-    kind: "command",
     inputs: { BACKDROP: BACKDROP_MENU },
   },
   "looks.switchBackdropAndWait": {
     opcode: "looks_switchbackdroptoandwait",
-    kind: "command",
     inputs: { BACKDROP: BACKDROP_MENU },
   },
-  "looks.nextBackdrop": { opcode: "looks_nextbackdrop", kind: "command" },
+  "looks.nextBackdrop": { opcode: "looks_nextbackdrop" },
   "looks.changeSize": {
     opcode: "looks_changesizeby",
-    kind: "command",
-    inputs: { CHANGE: { type: "number" } },
+    inputs: { CHANGE: NUMBER },
   },
   "looks.setSize": {
     opcode: "looks_setsizeto",
-    kind: "command",
-    inputs: { SIZE: { type: "number" } },
+    inputs: { SIZE: NUMBER },
   },
   "looks.changeEffect": {
     opcode: "looks_changeeffectby",
-    kind: "command",
     fields: { EFFECT: "color" },
-    inputs: { CHANGE: { type: "number" } },
+    inputs: { CHANGE: NUMBER },
   },
   "looks.setEffect": {
     opcode: "looks_seteffectto",
-    kind: "command",
     fields: { EFFECT: "color" },
-    inputs: { VALUE: { type: "number" } },
+    inputs: { VALUE: NUMBER },
   },
   "looks.clearEffects": {
     opcode: "looks_cleargraphiceffects",
-    kind: "command",
   },
-  "looks.show": { opcode: "looks_show", kind: "command" },
-  "looks.hide": { opcode: "looks_hide", kind: "command" },
+  "looks.show": { opcode: "looks_show" },
+  "looks.hide": { opcode: "looks_hide" },
   "looks.goToFrontLayer": {
     opcode: "looks_gotofrontback",
-    kind: "command",
     fields: { FRONT_BACK: "front" },
   },
   "looks.goLayers": {
     opcode: "looks_goforwardbackwardlayers",
-    kind: "command",
     fields: { FORWARD_BACKWARD: "forward" },
-    inputs: { NUM: { type: "integer" } },
+    inputs: { NUM: INTEGER },
   },
   "looks.costumeNumber": {
     opcode: "looks_costumenumbername",
@@ -259,37 +248,31 @@ export const CATALOG = {
   // ----------------------------------------------------------------- sound
   "sound.play": {
     opcode: "sound_play",
-    kind: "command",
     inputs: { SOUND_MENU: SOUND_MENU },
   },
   "sound.playUntilDone": {
     opcode: "sound_playuntildone",
-    kind: "command",
     inputs: { SOUND_MENU: SOUND_MENU },
   },
-  "sound.stopAllSounds": { opcode: "sound_stopallsounds", kind: "command" },
+  "sound.stopAllSounds": { opcode: "sound_stopallsounds" },
   "sound.changeEffect": {
     opcode: "sound_changeeffectby",
-    kind: "command",
     fields: { EFFECT: "pitch" },
-    inputs: { VALUE: { type: "number" } },
+    inputs: { VALUE: NUMBER },
   },
   "sound.setEffect": {
     opcode: "sound_seteffectto",
-    kind: "command",
     fields: { EFFECT: "pitch" },
-    inputs: { VALUE: { type: "number" } },
+    inputs: { VALUE: NUMBER },
   },
-  "sound.clearEffects": { opcode: "sound_cleareffects", kind: "command" },
+  "sound.clearEffects": { opcode: "sound_cleareffects" },
   "sound.changeVolume": {
     opcode: "sound_changevolumeby",
-    kind: "command",
-    inputs: { VOLUME: { type: "number" } },
+    inputs: { VOLUME: NUMBER },
   },
   "sound.setVolume": {
     opcode: "sound_setvolumeto",
-    kind: "command",
-    inputs: { VOLUME: { type: "number" } },
+    inputs: { VOLUME: NUMBER },
   },
   "sound.volume": { opcode: "sound_volume", kind: "reporter" },
 
@@ -302,12 +285,12 @@ export const CATALOG = {
   "sensing.touchingColor": {
     opcode: "sensing_touchingcolor",
     kind: "boolean",
-    inputs: { COLOR: { type: "color" } },
+    inputs: { COLOR: COLOR },
   },
   "sensing.colorIsTouchingColor": {
     opcode: "sensing_coloristouchingcolor",
     kind: "boolean",
-    inputs: { COLOR: { type: "color" }, COLOR2: { type: "color" } },
+    inputs: { COLOR: COLOR, COLOR2: COLOR },
   },
   "sensing.distanceTo": {
     opcode: "sensing_distanceto",
@@ -316,8 +299,7 @@ export const CATALOG = {
   },
   "sensing.askAndWait": {
     opcode: "sensing_askandwait",
-    kind: "command",
-    inputs: { QUESTION: { type: "string" } },
+    inputs: { QUESTION: STRING },
   },
   "sensing.answer": { opcode: "sensing_answer", kind: "reporter" },
   "sensing.keyPressed": {
@@ -330,7 +312,7 @@ export const CATALOG = {
   "sensing.mouseY": { opcode: "sensing_mousey", kind: "reporter" },
   "sensing.loudness": { opcode: "sensing_loudness", kind: "reporter" },
   "sensing.timer": { opcode: "sensing_timer", kind: "reporter" },
-  "sensing.resetTimer": { opcode: "sensing_resettimer", kind: "command" },
+  "sensing.resetTimer": { opcode: "sensing_resettimer" },
   "sensing.propertyOf": {
     opcode: "sensing_of",
     kind: "reporter",
@@ -352,110 +334,107 @@ export const CATALOG = {
   "operators.add": {
     opcode: "operator_add",
     kind: "reporter",
-    inputs: { NUM1: { type: "number" }, NUM2: { type: "number" } },
+    inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.subtract": {
     opcode: "operator_subtract",
     kind: "reporter",
-    inputs: { NUM1: { type: "number" }, NUM2: { type: "number" } },
+    inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.multiply": {
     opcode: "operator_multiply",
     kind: "reporter",
-    inputs: { NUM1: { type: "number" }, NUM2: { type: "number" } },
+    inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.divide": {
     opcode: "operator_divide",
     kind: "reporter",
-    inputs: { NUM1: { type: "number" }, NUM2: { type: "number" } },
+    inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.random": {
     opcode: "operator_random",
     kind: "reporter",
-    inputs: { FROM: { type: "number" }, TO: { type: "number" } },
+    inputs: { FROM: NUMBER, TO: NUMBER },
   },
   "operators.gt": {
     opcode: "operator_gt",
     kind: "boolean",
-    inputs: { OPERAND1: { type: "string" }, OPERAND2: { type: "string" } },
+    inputs: { OPERAND1: STRING, OPERAND2: STRING },
   },
   "operators.lt": {
     opcode: "operator_lt",
     kind: "boolean",
-    inputs: { OPERAND1: { type: "string" }, OPERAND2: { type: "string" } },
+    inputs: { OPERAND1: STRING, OPERAND2: STRING },
   },
   "operators.equals": {
     opcode: "operator_equals",
     kind: "boolean",
-    inputs: { OPERAND1: { type: "string" }, OPERAND2: { type: "string" } },
+    inputs: { OPERAND1: STRING, OPERAND2: STRING },
   },
   "operators.and": {
     opcode: "operator_and",
     kind: "boolean",
-    inputs: { OPERAND1: { type: "boolean" }, OPERAND2: { type: "boolean" } },
+    inputs: { OPERAND1: BOOLEAN, OPERAND2: BOOLEAN },
   },
   "operators.or": {
     opcode: "operator_or",
     kind: "boolean",
-    inputs: { OPERAND1: { type: "boolean" }, OPERAND2: { type: "boolean" } },
+    inputs: { OPERAND1: BOOLEAN, OPERAND2: BOOLEAN },
   },
   "operators.not": {
     opcode: "operator_not",
     kind: "boolean",
-    inputs: { OPERAND: { type: "boolean" } },
+    inputs: { OPERAND: BOOLEAN },
   },
   "operators.join": {
     opcode: "operator_join",
     kind: "reporter",
-    inputs: { STRING1: { type: "string" }, STRING2: { type: "string" } },
+    inputs: { STRING1: STRING, STRING2: STRING },
   },
   "operators.letterOf": {
     opcode: "operator_letter_of",
     kind: "reporter",
-    inputs: { LETTER: { type: "number" }, STRING: { type: "string" } },
+    inputs: { LETTER: NUMBER, STRING: STRING },
   },
   "operators.length": {
     opcode: "operator_length",
     kind: "reporter",
-    inputs: { STRING: { type: "string" } },
+    inputs: { STRING: STRING },
   },
   "operators.contains": {
     opcode: "operator_contains",
     kind: "boolean",
-    inputs: { STRING1: { type: "string" }, STRING2: { type: "string" } },
+    inputs: { STRING1: STRING, STRING2: STRING },
   },
   "operators.mod": {
     opcode: "operator_mod",
     kind: "reporter",
-    inputs: { NUM1: { type: "number" }, NUM2: { type: "number" } },
+    inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.round": {
     opcode: "operator_round",
     kind: "reporter",
-    inputs: { NUM: { type: "number" } },
+    inputs: { NUM: NUMBER },
   },
   "operators.math": {
     opcode: "operator_mathop",
     kind: "reporter",
     fields: { OPERATOR: "abs" },
-    inputs: { NUM: { type: "number" } },
+    inputs: { NUM: NUMBER },
   },
 
   // --------------------------------------------------------------- control
   "control.wait": {
     opcode: "control_wait",
-    kind: "command",
-    inputs: { DURATION: { type: "positive" } },
+    inputs: { DURATION: POSITIVE },
   },
   "control.repeat": {
     opcode: "control_repeat",
-    kind: "command",
-    inputs: { TIMES: { type: "whole" }, SUBSTACK: { type: "substack" } },
+    inputs: { TIMES: WHOLE, SUBSTACK: SUBSTACK },
   },
   "control.forever": {
     opcode: "control_forever",
-    kind: "command",
-    inputs: { SUBSTACK: { type: "substack" } },
+    inputs: { SUBSTACK: SUBSTACK },
     // PenguinMod builds this loop without a next-statement connection and only
     // creates one from the block's mutation (`hasbreak` — the nub the editor
     // adds by itself once a block sits below the loop). Blocks stacked under a
@@ -466,54 +445,45 @@ export const CATALOG = {
   },
   "control.if": {
     opcode: "control_if",
-    kind: "command",
-    inputs: { CONDITION: { type: "boolean" }, SUBSTACK: { type: "substack" } },
+    inputs: { CONDITION: BOOLEAN, SUBSTACK: SUBSTACK },
   },
   "control.ifElse": {
     opcode: "control_if_else",
-    kind: "command",
     inputs: {
-      CONDITION: { type: "boolean" },
-      SUBSTACK: { type: "substack" },
-      SUBSTACK2: { type: "substack" },
+      CONDITION: BOOLEAN,
+      SUBSTACK: SUBSTACK,
+      SUBSTACK2: SUBSTACK,
     },
   },
   "control.waitUntil": {
     opcode: "control_wait_until",
-    kind: "command",
-    inputs: { CONDITION: { type: "boolean" } },
+    inputs: { CONDITION: BOOLEAN },
   },
   "control.repeatUntil": {
     opcode: "control_repeat_until",
-    kind: "command",
-    inputs: { CONDITION: { type: "boolean" }, SUBSTACK: { type: "substack" } },
+    inputs: { CONDITION: BOOLEAN, SUBSTACK: SUBSTACK },
   },
   "control.stop": {
     opcode: "control_stop",
-    kind: "command",
     fields: { STOP_OPTION: "all" },
     stopBlock: true,
   },
   "control.clone": {
     opcode: "control_create_clone_of",
-    kind: "command",
     inputs: { CLONE_OPTION: CLONE_MENU },
   },
   "control.deleteThisClone": {
     opcode: "control_delete_this_clone",
-    kind: "command",
   },
 
   // ---------------------------------------------------------------- events
   "events.broadcast": {
     opcode: "event_broadcast",
-    kind: "command",
-    inputs: { BROADCAST_INPUT: { type: "broadcast" } },
+    inputs: { BROADCAST_INPUT: BROADCAST },
   },
   "events.broadcastAndWait": {
     opcode: "event_broadcastandwait",
-    kind: "command",
-    inputs: { BROADCAST_INPUT: { type: "broadcast" } },
+    inputs: { BROADCAST_INPUT: BROADCAST },
   },
 
   // --------------------------------------------------------------- hats
@@ -574,26 +544,23 @@ export const CATALOG = {
   },
 
   // ------------------------------------------------------------------ pen
-  "pen.clear": { opcode: "pen_clear", kind: "command", extension: "pen" },
-  "pen.stamp": { opcode: "pen_stamp", kind: "command", extension: "pen" },
-  "pen.penDown": { opcode: "pen_penDown", kind: "command", extension: "pen" },
-  "pen.penUp": { opcode: "pen_penUp", kind: "command", extension: "pen" },
+  "pen.clear": { opcode: "pen_clear", extension: "pen" },
+  "pen.stamp": { opcode: "pen_stamp", extension: "pen" },
+  "pen.penDown": { opcode: "pen_penDown", extension: "pen" },
+  "pen.penUp": { opcode: "pen_penUp", extension: "pen" },
   "pen.setColor": {
     opcode: "pen_setPenColorToColor",
-    kind: "command",
-    inputs: { COLOR: { type: "color" } },
+    inputs: { COLOR: COLOR },
     extension: "pen",
   },
   "pen.changeSize": {
     opcode: "pen_changePenSizeBy",
-    kind: "command",
-    inputs: { SIZE: { type: "number" } },
+    inputs: { SIZE: NUMBER },
     extension: "pen",
   },
   "pen.setSize": {
     opcode: "pen_setPenSizeTo",
-    kind: "command",
-    inputs: { SIZE: { type: "number" } },
+    inputs: { SIZE: NUMBER },
     extension: "pen",
   },
   // COLOR_PARAM is an input whose shadow is `pen_menu_colorParam`, not a
@@ -602,7 +569,6 @@ export const CATALOG = {
   // wrapping a shadow menu block (field name `colorParam`).
   "pen.changeColorParam": {
     opcode: "pen_changePenColorParamBy",
-    kind: "command",
     inputs: {
       COLOR_PARAM: {
         type: "menu",
@@ -610,13 +576,12 @@ export const CATALOG = {
         field: "colorParam",
         default: "color",
       },
-      VALUE: { type: "number" },
+      VALUE: NUMBER,
     },
     extension: "pen",
   },
   "pen.setColorParam": {
     opcode: "pen_setPenColorParamTo",
-    kind: "command",
     inputs: {
       COLOR_PARAM: {
         type: "menu",
@@ -624,7 +589,7 @@ export const CATALOG = {
         field: "colorParam",
         default: "color",
       },
-      VALUE: { type: "number" },
+      VALUE: NUMBER,
     },
     extension: "pen",
   },
@@ -646,6 +611,18 @@ export const CATALOG = {
     fields: { VALUE: ["is penguinmod?", null] },
   },
 };
+
+/**
+ * Catalog entries with the default `kind` filled in: everything is a command
+ * unless the table above said otherwise.
+ * @type {Record<string, object>}
+ */
+export const CATALOG = Object.fromEntries(
+  Object.entries(CORE_CATALOG).map(([name, entry]) => [
+    name,
+    { kind: "command", ...entry },
+  ]),
+);
 
 /**
  * Native Scratch variable/list mutation opcodes used when a list method is
