@@ -217,6 +217,8 @@ async function cmdBuild(args) {
     extensionUrls,
     useConfigFile: !args.flags["no-config"],
   });
+  for (const warning of result.warnings)
+    process.stderr.write(`warning: ${warning}\n`);
 
   const explicit = args.flags.o || args.flags.output;
   const output =

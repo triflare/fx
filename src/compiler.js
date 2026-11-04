@@ -25,6 +25,11 @@ const HAT_ALIASES = {
   timerGreaterThan: "events.timerGreaterThan",
 };
 
+// `dataFormat` values Scratch 3 can load (see the `VM.Costume` / `VM.Sound`
+// types). Anything else is still written through, but may not load.
+const COSTUME_FORMATS = new Set(["svg", "png", "jpg"]);
+const SOUND_FORMATS = new Set(["wav", "mp3"]);
+
 const NUMBER_TYPES = {
   number: 4,
   positive: 5,
@@ -133,6 +138,8 @@ export class Compiler {
     this.catalog = catalog ? { ...CATALOG, ...catalog } : CATALOG;
     this.extensionUrls = extensionUrls;
     this.file = file;
+    /** @type {string[]} Non-fatal problems worth surfacing to the user. */
+    this.warnings = [];
 
     // opcode -> extension id, derived from the (merged) catalog. This lets
     // synthesized extension blocks declare an id that isn't inferable from
@@ -463,12 +470,20 @@ export class Compiler {
   applyCostumes(ctx, property) {
     for (const entry of property.value) {
       const format = detectFormat(entry.value);
+      if (!COSTUME_FORMATS.has(format))
+        this.warnings.push(
+          `costume ${JSON.stringify(entry.key)} uses dataFormat ` +
+            `"${format}"; Scratch 3 costumes are svg, png or jpg`,
+        );
       const buffer = this.readAsset(entry.value, entry.loc);
       const { width, height } = imageSize(buffer, format);
       const asset = this.registerAsset(buffer, format);
       ctx.target.costumes.push({
         name: entry.key,
-        bitmapResolution: 1,
+        // Scratch 3 saves bitmap costumes at 2x; the VM converts a 1 to 2 on
+        // load anyway (`import/load-costume.js`), and the renderer's
+        // BitmapSkin defaults to 2. SVGs are always 1.
+        bitmapResolution: format === "svg" ? 1 : 2,
         dataFormat: format,
         assetId: asset.assetId,
         md5ext: asset.md5ext,
@@ -481,6 +496,11 @@ export class Compiler {
   applySounds(ctx, property) {
     for (const entry of property.value) {
       const format = detectFormat(entry.value);
+      if (!SOUND_FORMATS.has(format))
+        this.warnings.push(
+          `sound ${JSON.stringify(entry.key)} uses dataFormat ` +
+            `"${format}"; Scratch 3 sounds are wav or mp3`,
+        );
       const buffer = this.readAsset(entry.value, entry.loc);
       const info =
         format === "wav" ? wavInfo(buffer) : { rate: 48000, sampleCount: 0 };
@@ -577,7 +597,7 @@ export class Compiler {
         }
       } else if (spec.input) {
         inputs[spec.input] = this.buildInputForSpec(
-          { type: spec.type || "any" },
+          { type: spec.type || "any", default: spec.default },
           argExpr,
           null,
         );
@@ -1110,7 +1130,16 @@ export class Compiler {
   }
 
   defaultPrim(spec) {
-    switch (spec.type) {
+    const prim = this.defaultPrimForType(spec.type);
+    // Extensions declare the value a call falls back to when it omits an
+    // argument; built-in catalog entries never set `default`.
+    if (spec.default !== undefined && spec.default !== null)
+      prim[1] = String(spec.default);
+    return prim;
+  }
+
+  defaultPrimForType(type) {
+    switch (type) {
       case "number":
         return [4, "0"];
       case "positive":

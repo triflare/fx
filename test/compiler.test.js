@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
@@ -320,6 +322,117 @@ test("compiles catalog boolean inputs, including infix and/or", () => {
   ]) {
     assert.ok(codes.includes(opcode), `expected ${opcode}`);
   }
+});
+
+test("emits the project shape scratch-vm's sb3 loader expects", () => {
+  const png = Buffer.alloc(24);
+  png.writeUInt32BE(0x89504e47, 0);
+  png.writeUInt32BE(40, 16);
+  png.writeUInt32BE(30, 20);
+  const svg = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"></svg>',
+  );
+  const ast = parse(
+    `sprite "S" { costumes: { dot: "dot.png", art: "art.svg" }; when greenFlag { looks.show(); } }`,
+    "inline.tfx",
+  );
+  const { project } = compile(ast, {
+    project: {},
+    loadAsset: (file) => (file.endsWith(".png") ? png : svg),
+  });
+
+  // VM.sb3 serializer metadata: `semver`, `vm`, `agent`.
+  assert.equal(project.meta.semver, "3.0.0");
+  assert.equal(project.meta.vm, "0.2.0");
+  assert.equal(typeof project.meta.agent, "string");
+
+  const stage = project.targets.find((target) => target.isStage);
+  assert.equal(stage.layerOrder, 0);
+  for (const key of [
+    "tempo",
+    "videoTransparency",
+    "videoState",
+    "textToSpeechLanguage",
+  ]) {
+    assert.ok(key in stage, `stage.${key}`);
+  }
+
+  const sprite = project.targets.find((target) => target.name === "S");
+  // Bitmap costumes are 2x in Scratch 3 (`import/load-costume.js`); SVG is 1.
+  const [dot, art] = sprite.costumes;
+  assert.equal(dot.dataFormat, "png");
+  assert.equal(dot.bitmapResolution, 2);
+  assert.deepEqual([dot.rotationCenterX, dot.rotationCenterY], [20, 15]);
+  assert.equal(art.dataFormat, "svg");
+  assert.equal(art.bitmapResolution, 1);
+  // Values from RenderedTarget's ROTATION_STYLE_* constants.
+  assert.ok(
+    ["all around", "left-right", "don't rotate"].includes(sprite.rotationStyle),
+  );
+  assert.equal(typeof sprite.visible, "boolean");
+  assert.equal(typeof sprite.draggable, "boolean");
+  for (const key of ["size", "direction", "x", "y"])
+    assert.equal(typeof sprite[key], "number", key);
+
+  for (const block of Object.values(sprite.blocks)) {
+    assert.equal(typeof block.opcode, "string");
+    assert.equal(typeof block.shadow, "boolean");
+    assert.equal(typeof block.topLevel, "boolean");
+    if (block.topLevel) assert.equal(typeof block.x, "number");
+  }
+});
+
+test("warns about asset formats Scratch 3 cannot load", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-assets-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, "dot.gif"), Buffer.alloc(4));
+  fs.writeFileSync(path.join(dir, "hum.ogg"), Buffer.alloc(4));
+  const result = build({
+    dir,
+    useConfigFile: false,
+    source:
+      'sprite "S" { costumes: { dot: "dot.gif" }; sounds: { hum: "hum.ogg" }; ' +
+      "when greenFlag { looks.show(); } }",
+  });
+  assert.deepEqual(result.warnings, [
+    'costume "dot" uses dataFormat "gif"; Scratch 3 costumes are svg, png or jpg',
+    'sound "hum" uses dataFormat "ogg"; Scratch 3 sounds are wav or mp3',
+  ]);
+});
+
+test("does not warn about svg, png, jpg, wav or mp3 assets", () => {
+  const result = build({
+    file: path.join(root, "test/fixtures/all-blocks/all-blocks.tfx"),
+    useConfigFile: false,
+  });
+  assert.deepEqual(result.warnings, []);
+});
+
+test("uses extension argument defaults when a call omits an argument", () => {
+  const ast = parse(
+    `sprite "S" { when greenFlag { demo.go(); } }`,
+    "inline.tfx",
+  );
+  const catalog = {
+    "demo.go": {
+      opcode: "demo_go",
+      kind: "command",
+      extension: "demo",
+      inputs: {
+        N: { type: "number", default: 60 },
+        T: { type: "string", default: "hi" },
+        X: { type: "number" },
+      },
+    },
+  };
+  const { project } = compile(ast, { project: {}, catalog });
+  const target = project.targets.find((t) => t.name === "S");
+  const block = Object.values(target.blocks).find(
+    (b) => b.opcode === "demo_go",
+  );
+  assert.deepEqual(block.inputs.N, [1, [4, "60"]]);
+  assert.deepEqual(block.inputs.T, [1, [10, "hi"]]);
+  assert.deepEqual(block.inputs.X, [1, [4, "0"]]);
 });
 
 test("rejects statements after a block that ends the script", () => {

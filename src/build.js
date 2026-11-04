@@ -98,7 +98,7 @@ function resolveSources(options) {
 
 /**
  * @param {BuildOptions} [options]
- * @returns {{project: object, assets: Map<string, Buffer>, sb3: Buffer, config: object, fx: object, ast: object, files: string[]}}
+ * @returns {{project: object, assets: Map<string, Buffer>, sb3: Buffer, config: object, fx: object, ast: object, files: string[], warnings: string[]}}
  */
 export function build(options = {}) {
   const { dir, entries } = resolveSources(options);
@@ -155,6 +155,7 @@ export function build(options = {}) {
     fx: fxConfig,
     ast,
     files: entries.map((e) => e.file),
+    warnings: compiler.warnings,
   };
 }
 
