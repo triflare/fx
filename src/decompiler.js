@@ -376,13 +376,23 @@ class Decompiler {
     const proto = this.target.blocks[protoId];
     const mutation = (proto && proto.mutation) || {};
     const proccode = mutation.proccode || "procedure";
+    const ids = mutation.argumentids ? JSON.parse(mutation.argumentids) : [];
     const names = mutation.argumentnames
       ? JSON.parse(mutation.argumentnames)
       : [];
+    // Parameter types live on the prototype's argument reporter shadows, not
+    // in the mutation, so read them back or `loud: boolean` decompiles to a
+    // string parameter.
+    const params = names.map((name, index) => {
+      const reporter =
+        proto && this.target.blocks[firstOf(proto.inputs[ids[index]])];
+      return reporter && reporter.opcode === "argument_reporter_boolean"
+        ? `${name}: boolean`
+        : name;
+    });
     const baseName = proccode.split(" ")[0];
     const returning = this.returningProccodes.has(proccode) ? "returning " : "";
-    const params = names.join(", ");
-    return `${returning}function ${baseName}(${params}) {\n${this.renderStack(defBlock.next, 1)}\n}`;
+    return `${returning}function ${baseName}(${params.join(", ")}) {\n${this.renderStack(defBlock.next, 1)}\n}`;
   }
 
   decompileTarget(target, indent = 0) {

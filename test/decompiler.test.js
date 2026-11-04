@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
+import { CATALOG } from "../src/catalog.js";
 import { compile } from "../src/compiler.js";
 import { decompile, decompileProject } from "../src/decompiler.js";
 import { loadExtensions } from "../src/extensions.js";
@@ -12,6 +13,7 @@ import { unzipSync } from "../src/sb3.js";
 import { parse } from "../src/parser.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const showcase = path.join(root, "test/fixtures/all-blocks/all-blocks.tfx");
 
 test("decompiles a project back into parseable Triflare Fx", () => {
   const { sb3 } = build({
@@ -107,6 +109,37 @@ test("bundles local extensions as data URIs and decompiles them back", async (t)
   assert.match(source, /signals\.send\("hi"\);/);
   assert.match(source, /when signals\.whenBang\(\) \{/);
   assert.doesNotThrow(() => parse(source, "restored.tfx"));
+});
+
+test("every catalog block survives a build -> decompile -> build round trip", () => {
+  const first = build({ file: showcase, useConfigFile: false });
+  const source = decompile(first.sb3);
+  // A gap shows up either as a comment emitted by the decompiler or as a
+  // missing opcode after recompiling.
+  assert.doesNotMatch(source, /unsupported block/);
+  assert.doesNotMatch(source, /\/\* unknown/);
+
+  const loadAsset = () =>
+    Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>',
+    );
+  const { project } = compile(parse(source, "roundtrip.tfx"), {
+    project: {},
+    loadAsset,
+  });
+
+  const opcodes = (value) =>
+    value.targets
+      .flatMap((target) => Object.values(target.blocks).map((b) => b.opcode))
+      .sort();
+  assert.deepEqual(opcodes(project), opcodes(first.project));
+
+  // Name the coverage explicitly so a future entry without a decompiler path
+  // fails here instead of quietly becoming a comment.
+  const emitted = new Set(opcodes(project));
+  for (const [name, entry] of Object.entries(CATALOG)) {
+    assert.ok(emitted.has(entry.opcode), `${name} -> ${entry.opcode}`);
+  }
 });
 
 test("the sb3 zip contains project.json plus the referenced assets", () => {
