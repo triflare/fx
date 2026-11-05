@@ -302,7 +302,9 @@ class Analyzer {
       message,
       ...rangeOf(loc, length),
       explanation: rule.explanation,
-      fixable: Boolean(rule.fixable),
+      // Only advertise fixability when this diagnostic actually carries a
+      // fix, so FX204 without a block to insert into is not offered as fixable.
+      fixable: Boolean(rule.fixable) && Boolean(fix),
       ...(fix ? { fix } : {}),
     });
   }
@@ -563,7 +565,11 @@ class Analyzer {
             { length: 1 },
           );
         }
-        if (truthy(value) && !this.bodyYields(statement.body, state)) {
+        if (
+          value !== null &&
+          truthy(value) &&
+          !this.bodyYields(statement.body, state)
+        ) {
           this.report(
             "FX301",
             statement.loc,

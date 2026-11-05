@@ -73,6 +73,25 @@ test("reports undefined names, implicit variables and division by zero", () => {
   assert.deepEqual(ruleIds(lint(source)), ["FX201", "FX202", "FX204", "FX404"]);
 });
 
+test("FX204 is only advertised as fixable when a fix exists", () => {
+  const fixable = lint(`sprite "Cat" {
+    when greenFlag {
+        count = 1;
+    }
+}`).find((entry) => entry.ruleId === "FX204");
+  assert.ok(fixable);
+  assert.equal(fixable.fixable, true);
+  assert.ok(fixable.fix);
+
+  // A stage script without a `stage {` block has nowhere to insert a fix.
+  const stage = lint("when greenFlag {\n    count = 1;\n}\n").find(
+    (entry) => entry.ruleId === "FX204",
+  );
+  assert.ok(stage);
+  assert.equal(stage.fixable, false);
+  assert.equal(stage.fix, undefined);
+});
+
 test("leaves a project with declared names alone", () => {
   assert.deepEqual(lint(CLEAN), []);
 });
@@ -478,6 +497,28 @@ test("reports invalid suppressions and, in strict mode, unused ones", () => {
 });
 
 // ------------------------------------------------------------------ project
+
+test("a runtime while condition does not report an infinite loop", () => {
+  const runtime = `sprite "Cat" {
+    let running = true;
+
+    when greenFlag {
+        while (running) {
+            motion.moveSteps(1);
+        }
+    }
+}`;
+  assert.ok(!ruleIds(lint(runtime)).includes("FX301"));
+
+  const constant = `sprite "Cat" {
+    when greenFlag {
+        while (true) {
+            motion.moveSteps(1);
+        }
+    }
+}`;
+  assert.ok(ruleIds(lint(constant)).includes("FX301"));
+});
 
 test("reports partial sprites that the project cannot merge", () => {
   const fragment = `partial sprite "Cat" {
