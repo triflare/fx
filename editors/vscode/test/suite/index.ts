@@ -67,6 +67,25 @@ test("syntax errors become diagnostics", async () => {
   assert(diagnostics[0].source === "fx", "wrong diagnostic source");
 });
 
+test("lint diagnostics carry rule IDs", async () => {
+  const document = await vscode.workspace.openTextDocument({
+    language: "fx",
+    content:
+      'sprite "Cat" {\n  when greenFlag {\n    looks.say(nope);\n  }\n}\n',
+  });
+  const diagnostics = await waitFor(() => {
+    const found = vscode.languages.getDiagnostics(document.uri);
+    return found.some((entry) => entry.code === "FX201") ? found : undefined;
+  }, "lint diagnostics for an undefined variable");
+  const lint = diagnostics.find((entry) => entry.code === "FX201");
+  assert(lint !== undefined, "FX201 missing");
+  assert(lint.source === "fx", "wrong diagnostic source");
+  assert(
+    lint.severity === vscode.DiagnosticSeverity.Error,
+    "FX201 should be an error",
+  );
+});
+
 test("valid documents stay clean", async () => {
   const document = await vscode.workspace.openTextDocument({
     language: "fx",

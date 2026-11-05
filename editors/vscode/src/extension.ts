@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { CATALOG, LIST_OPS, blockNames } from "../../../src/catalog.js";
 import { FxError } from "../../../src/errors.js";
-import { parse } from "../../../src/parser.js";
+import { FxQuickFixProvider, lintDocument, publishDiagnostics } from "./lint";
 
 const LANGUAGE_ID = "fx";
 const DEBOUNCE_MS = 300;
@@ -168,18 +168,19 @@ class FxCompletionProvider implements vscode.CompletionItemProvider {
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Parse the document and publish any lexical/syntax error as a diagnostic.
- * `parse` runs the lexer first, so LexErrors surface the same way.
+ * Lint the document's project and publish the resulting diagnostics for every
+ * open source in it. Syntax errors arrive as FX000, so they surface the same
+ * way as every other rule.
  */
-function refreshDiagnostics(
+async function refreshDiagnostics(
   document: vscode.TextDocument,
   collection: vscode.DiagnosticCollection,
-): void {
+): Promise<void> {
   if (document.languageId !== LANGUAGE_ID) return;
 
   try {
-    parse(document.getText(), document.uri.toString());
-    collection.delete(document.uri);
+    const project = await lintDocument(document);
+    publishDiagnostics(collection, project);
   } catch (error) {
     collection.set(document.uri, [toDiagnostic(error, document)]);
   }
@@ -228,7 +229,7 @@ export function activate(context: vscode.ExtensionContext): void {
       key,
       setTimeout(() => {
         debounceTimers.delete(key);
-        refreshDiagnostics(document, collection);
+        void refreshDiagnostics(document, collection);
       }, DEBOUNCE_MS),
     );
   };
@@ -239,12 +240,20 @@ export function activate(context: vscode.ExtensionContext): void {
       new FxCompletionProvider(),
       ".", // trigger category/list-method completion after the dot
     ),
-    vscode.workspace.onDidOpenTextDocument((document) =>
-      refreshDiagnostics(document, collection),
+    vscode.languages.registerCodeActionsProvider(
+      { language: LANGUAGE_ID },
+      new FxQuickFixProvider(),
+      { providedCodeActionKinds: FxQuickFixProvider.providedCodeActionKinds },
     ),
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      void refreshDiagnostics(document, collection);
+    }),
     vscode.workspace.onDidChangeTextDocument((event) =>
       schedule(event.document),
     ),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      void refreshDiagnostics(document, collection);
+    }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       const key = document.uri.toString();
       const pending = debounceTimers.get(key);
@@ -256,7 +265,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Pick up documents that were already open when the extension activated.
   for (const document of vscode.workspace.textDocuments) {
-    refreshDiagnostics(document, collection);
+    void refreshDiagnostics(document, collection);
   }
 }
 

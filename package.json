@@ -15,7 +15,8 @@
   "exports": {
     ".": "./src/index.js",
     "./catalog": "./src/catalog.js",
-    "./language": "./src/language.js"
+    "./language": "./src/language.js",
+    "./lint": "./src/lint/analyze.js"
   },
   "files": [
     "bin",

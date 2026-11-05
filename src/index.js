@@ -9,6 +9,14 @@
 export { tokenize } from "./lexer.js";
 export { parse } from "./parser.js";
 export { formatSource } from "./formatter.js";
+export { applyFixes, lintSources, sortDiagnostics } from "./linter.js";
+export {
+  DEFAULT_LINT,
+  normalizeLintConfig,
+  resolveRuleSeverities,
+} from "./lint/config.js";
+export { parseProjectConfigText } from "./lint/config-file.js";
+export { CATEGORIES, PRESETS, RULES } from "./lint/rules.js";
 export { Compiler, compile } from "./compiler.js";
 export { build, writeSb3 } from "./build.js";
 export { discoverSources, mergePrograms } from "./project.js";
