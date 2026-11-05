@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
+import { loadProjectState } from "../src/cli/context.js";
 import { loadConfigFrom, parseConfig } from "../src/config.js";
 import {
   addVendorEntry,
@@ -1172,6 +1173,65 @@ test("refuses to write or read through a symlinked vendor directory", async () =
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("rejects vendor directories outside or equal to the config directory", async () => {
+  const parent = tmp();
+  const outside = path.join(parent, "outside");
+  const equal = path.join(parent, "equal");
+  try {
+    write(
+      path.join(parent, "project", "fx.yml"),
+      `project:\n  name: "Vendor"\nvendorDir: ../outside\nvendor:\n  local: ./local.js\n`,
+    );
+    write(path.join(parent, "project", "local.js"), SIGNALS);
+    await assert.rejects(
+      installVendor({
+        configDir: path.join(parent, "project"),
+        config: loadConfigFrom(path.join(parent, "project")),
+      }),
+      /must be inside the config directory/,
+    );
+
+    write(
+      path.join(equal, "fx.yml"),
+      `project:\n  name: "Vendor"\nvendorDir: .\nvendor:\n  local: ./local.js\n`,
+    );
+    write(path.join(equal, "local.js"), SIGNALS);
+    await assert.rejects(
+      installVendor({ configDir: equal, config: loadConfigFrom(equal) }),
+      /must be inside the config directory/,
+    );
+
+    assert.equal(fs.existsSync(outside), false);
+    assert.equal(fs.existsSync(path.join(equal, "local-2.js")), false);
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("a failed legacy migration is not retried in the same process", async () => {
+  const dir = project({
+    config: `project:\n  name: "Broken"\n  extensions:\n    - ./missing.js\n`,
+  });
+  const warnings = [];
+  const reporter = { warn: (message) => warnings.push(message) };
+  try {
+    const options = { yes: true };
+    for (let attempt = 0; attempt < 2; attempt += 1)
+      await loadProjectState({
+        cwd: dir,
+        options,
+        reporter,
+        includeExtensions: false,
+      });
+    assert.equal(
+      warnings.filter((warning) => /Could not migrate/.test(warning)).length,
+      1,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

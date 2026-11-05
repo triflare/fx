@@ -138,6 +138,8 @@ async function upgradeLegacyExtensions({
       );
     return loadProjectConfig({ cwd, searchDir, options, reporter });
   } catch (error) {
+    // A failed migration would otherwise warn (and retry) on every rebuild.
+    migrationDeclined.add(loaded.path);
     reporter.warn(`Could not migrate project.extensions: ${error.message}`);
     return loaded;
   }
