@@ -84,6 +84,8 @@ compiles a project, so it cannot change generated behavior.`,
     const files = target.file ? [target.file] : discoverSources(target.dir);
     if (files.length === 0)
       throw new UsageError(`No ${EXTENSION} files found under ${target.dir}`);
+    if (options.stdout && options.check)
+      throw new UsageError("--stdout cannot be combined with --check");
     if (options.stdout && !target.file)
       throw new UsageError(
         "--stdout requires a single file; pass one or use --stdin",

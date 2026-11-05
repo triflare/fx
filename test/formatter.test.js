@@ -109,6 +109,51 @@ test("parenthesizes only where the parse tree needs it", () => {
   );
 });
 
+test("preserves not grouping across operator operands", () => {
+  for (const expression of [
+    "(not a) == b",
+    "1 + (not a)",
+    "-(not a)",
+    "a and not b",
+    "not a or not b",
+    "not not a",
+    "-(-a)",
+  ]) {
+    const source = `stage { let result = ${expression}; }`;
+    const formatted = formatSource(source);
+    assert.deepEqual(stripLoc(parse(formatted)), stripLoc(parse(source)));
+    assert.equal(formatSource(formatted), formatted);
+  }
+});
+
+test("normalizes line endings and trailing whitespace in block comments", () => {
+  const expected = "/* first\nsecond\n*/\n";
+  for (const newline of ["\r\n", "\r"]) {
+    const source = `/* first \t${newline}second\t ${newline}*/`;
+    const formatted = formatSource(source);
+    assert.equal(formatted, expected);
+    assert.equal(formatSource(formatted), formatted);
+  }
+});
+
+test("normalizes CRLF line comments without introducing blank lines", () => {
+  const source = "// header\r\nstage { let x = 1; // trailing\r\n}\r\n";
+  const formatted = formatSource(source);
+  assert.equal(
+    formatted,
+    "// header\nstage {\n    let x = 1; // trailing\n}\n",
+  );
+  assert.equal(formatSource(formatted), formatted);
+});
+
+test("normalizes multiline comments following statements", () => {
+  const source = "stage { let x = 1; /* first\rsecond */ let y = 2; }";
+  const formatted = formatSource(source);
+  assert.ok(!formatted.includes("\r"));
+  assert.equal(formatSource(formatted), formatted);
+  assert.deepEqual(stripLoc(parse(formatted)), stripLoc(parse(source)));
+});
+
 test("keeps comments and their placement", () => {
   const source = `// header
 sprite "S" { // opening
@@ -313,6 +358,15 @@ test("fx fmt --stdout and --stdin support pipelines", () => {
     assert.equal(stdout.status, 0, stdout.stderr);
     assert.equal(stdout.stdout, clean);
     assert.equal(fs.readFileSync(file, "utf8"), messy);
+
+    const conflict = run(["fmt", "src/main.tfx", "--check", "--stdout"], dir);
+    assert.equal(conflict.status, 2, conflict.stderr);
+    assert.match(conflict.stderr, /--stdout cannot be combined with --check/);
+    assert.equal(fs.readFileSync(file, "utf8"), messy);
+
+    const directory = run(["fmt", "--stdout"], dir);
+    assert.equal(directory.status, 2, directory.stderr);
+    assert.match(directory.stderr, /--stdout requires a single file/);
 
     const stdin = run(["fmt", "--stdin"], dir, messy);
     assert.equal(stdin.status, 0, stdin.stderr);

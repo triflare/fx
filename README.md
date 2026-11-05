@@ -55,6 +55,63 @@ $ fx build
   extensions: (none)
 ```
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:1f825081f9f722158035083df5b16f42120cc5fbd7d56eb25c770f3c64e339b2 -->
+
+## Formatting
+
+Run `fx fmt` to format every `.tfx` source in the current directory, or pass a file or directory:
+
+```bash
+fx fmt
+fx fmt src/main.tfx
+fx fmt src/ --check
+cat src/main.tfx | fx fmt --stdin
+fx fmt src/main.tfx --stdout
+fx fmt --check --json
+```
+
+- `--check` leaves files untouched and exits with status 1 if formatting is needed (0 if already formatted).
+- `--stdin` reads source from standard input and writes formatted source to standard output; it takes no file argument. With `--check`, it checks the input instead.
+- `--stdout` writes formatted source for a single file to standard output without changing the file. It cannot be combined with `--check`.
+- `--json` returns a structured result, including formatted code for `--stdin` and `--stdout` output.
+
+Formatting is idempotent: running it twice produces no further changes. It preserves comments, declaration order, and project data, normalizes whitespace and line endings, and does not compile the project. Files with parse errors are left untouched.
+
+## Vendoring Extensions
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+Extension URLs are mutable and can disappear, so Fx can commit a verified copy of every extension instead. Declare them under `vendor:` in `fx.yml`; order is load order:
+
+```yaml
+vendorDir: extensions # default
+vendor:
+  signals: https://example.com/signals.js
+  xterm:
+    url: http://localhost:8080/xterm.js
+    volatile: true
+  mything: ./src/mything.js
+```
+
+`fx vendor install <url|path> --as <name>` copies the source to `extensions/`, records its SHA-256 in `fx.lock`, and adds it to `fx.yml`. Builds load the vendored copy and embed its source, so no network access is needed after installation. Remote entries fail if their hash changes; `volatile` entries (such as localhost URLs) warn instead. Local paths remain the source of truth and are re-copied on each build with a generated-file header.
+
+`vendorDir` must be a directory inside the project directory.
+
+```bash
+fx vendor install              # restore from fx.lock, fetching only missing files
+fx vendor update [name]        # show a diff and write updated files and fx.lock
+fx vendor update [name] --dry-run # preview changes without writing
+fx vendor outdated             # compare upstream with fx.lock
+fx vendor verify               # check files against fx.lock, offline
+fx vendor remove <name>
+fx vendor list [--json]
+fx vendor migrate              # move project.extensions under vendor:
+```
+
+`fx vendor migrate` writes `fx.yml.bak` first and shows the config diff. Builds only offer migration when running in a terminal; use `--no-upgrade-prompt` or `FX_NO_PROMPT=1` to keep the legacy `project.extensions` behavior.
+
 ## Installation
 
 **Requirements:**

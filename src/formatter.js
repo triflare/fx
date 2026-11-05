@@ -64,9 +64,10 @@ function mapKey(key) {
  *
  * @param {object} node
  * @param {number} [minimum] lowest precedence allowed without parentheses
+ * @param {string} [parentOperator] operator receiving this expression
  * @returns {string}
  */
-function renderExpression(node, minimum = 0) {
+function renderExpression(node, minimum = 0, parentOperator) {
   switch (node.type) {
     case "Number":
       return String(node.value);
@@ -83,18 +84,23 @@ function renderExpression(node, minimum = 0) {
     case "ArrayLiteral":
       return `[${node.items.map((item) => renderExpression(item)).join(", ")}]`;
     case "Unary": {
-      const operand = renderExpression(node.operand, UNARY_PRECEDENCE);
-      if (node.op === "not") return `not ${operand}`;
+      const operand = renderExpression(node.operand, UNARY_PRECEDENCE, node.op);
+      if (node.op === "not") {
+        const text = `not ${operand}`;
+        return parentOperator && !["and", "or", "not"].includes(parentOperator)
+          ? `(${text})`
+          : text;
+      }
       // `--x` is legal but reads like a decrement waiting to happen.
       const nested = node.operand.type === "Unary" && node.operand.op === "-";
       return `-${nested ? `(${operand})` : operand}`;
     }
     case "Binary": {
       const precedence = PRECEDENCE[node.op] ?? 0;
-      const left = renderExpression(node.left, precedence);
+      const left = renderExpression(node.left, precedence, node.op);
       // Right operands need parentheses at equal precedence to keep left
       // associativity from regrouping them, e.g. `a - (b - c)`.
-      const right = renderExpression(node.right, precedence + 1);
+      const right = renderExpression(node.right, precedence + 1, node.op);
       const text = `${left} ${node.op} ${right}`;
       return precedence < minimum ? `(${text})` : text;
     }
@@ -193,7 +199,7 @@ class Formatter {
 
   /** Whether a comment can share the previous output line. */
   canInline(comment) {
-    if (comment.text.includes("\n")) return false;
+    if (/\r(?!$)|\n/.test(comment.text)) return false;
     if (this.out.length === 0) return false;
     if (this.out[this.out.length - 1].trim() === "") return false;
     const previous = this.tokens[comment.after - 1];
@@ -222,7 +228,14 @@ class Formatter {
       const comment = this.comments[this.commentIndex];
       if (comment.after > limit) break;
       this.commentIndex += 1;
-      const lines = comment.text.replace(/[ \t]+$/gm, "").split("\n");
+      // The lexer includes the CR of a CRLF terminator in line comments.
+      const text = comment.text.startsWith("//")
+        ? comment.text.replace(/\r$/, "")
+        : comment.text;
+      const lines = text
+        .replace(/\r\n?/g, "\n")
+        .replace(/[ \t]+$/gm, "")
+        .split("\n");
       if (lines.length === 1 && this.canInline(comment)) {
         this.out[this.out.length - 1] += ` ${lines[0].trim()}`;
         continue;
