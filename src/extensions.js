@@ -757,6 +757,7 @@ const BASE64_PAYLOAD = /^[A-Za-z0-9+/=\s]*$/;
  * @param {string} source
  * @returns {string}
  */
+/** Encode extension source as a self-contained JavaScript data URI. */
 export function extensionDataUri(source) {
   const base64 = Buffer.from(String(source), "utf8").toString("base64");
   return `data:text/javascript;base64,${base64}`;
@@ -782,8 +783,13 @@ export function readExtensionDataUri(uri) {
   }
 }
 
-/** Resolve a config entry to source text. */
-async function resolveSource(entry, baseDir, fetchImpl) {
+/**
+ * Resolve a config entry to source text and the original bytes.
+ *
+ * The raw buffer is retained so vendoring can lock exactly what the server
+ * returned, even when the text decoder strips a byte-order mark.
+ */
+export async function resolveSource(entry, baseDir, fetchImpl) {
   const value = String(entry);
   if (/^data:/i.test(value)) {
     const source = readExtensionDataUri(value);
@@ -791,7 +797,13 @@ async function resolveSource(entry, baseDir, fetchImpl) {
       throw new Error(
         "unsupported data URI; expected base64 or percent-encoded JavaScript",
       );
-    return { source, remote: false, dataUri: true, url: value };
+    return {
+      source,
+      buffer: Buffer.from(source, "utf8"),
+      remote: false,
+      dataUri: true,
+      url: value,
+    };
   }
   if (/^https?:\/\//i.test(value)) {
     const fetchFn = fetchImpl || globalThis.fetch;
@@ -800,13 +812,24 @@ async function resolveSource(entry, baseDir, fetchImpl) {
     const response = await fetchFn(value);
     if (!response.ok)
       throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
-    return { source: await response.text(), remote: true, url: value };
+    const buffer =
+      typeof response.arrayBuffer === "function"
+        ? Buffer.from(await response.arrayBuffer())
+        : Buffer.from(await response.text(), "utf8");
+    return {
+      source: buffer.toString("utf8").replace(/^\uFEFF/, ""),
+      buffer,
+      remote: true,
+      url: value,
+    };
   }
   const resolved = path.isAbsolute(value)
     ? value
     : path.resolve(baseDir, value);
+  const buffer = fs.readFileSync(resolved);
   return {
-    source: fs.readFileSync(resolved, "utf8"),
+    source: buffer.toString("utf8"),
+    buffer,
     remote: false,
     url: value,
     file: resolved,
@@ -851,18 +874,38 @@ async function evaluateExtensionAny(source, filename) {
 }
 
 /**
+ * Inspect extension source without running it in the Node.js process.
+ * Useful to propose an extension id while vendoring or migrating.
+ * @param {string} source
+ * @param {string} [filename]
+ * @returns {Promise<{infos: object[], unsandboxed: boolean}>}
+ */
+export async function inspectExtension(source, filename = "extension") {
+  return evaluateExtensionAny(source, filename);
+}
+
+/**
  * Load a list of extension references.
  *
  * @param {Array<string>} list Paths, `http(s)://` URLs or `data:` URIs.
- * @param {{baseDir?: string, fetchImpl?: typeof fetch, expectUnsandboxed?: string|string[]}} [options]
+ * @param {{baseDir?: string, fetchImpl?: typeof fetch, expectUnsandboxed?: string|string[], reportUnmatchedUnsandboxed?: boolean}} [options]
  *   `expectUnsandboxed` acknowledges extensions that are known to require
- *   unsandboxed mode, silencing the warning for them.
- * @returns {Promise<{catalog: Record<string, object>, extensionUrls: Record<string, string>, warnings: string[], ids: string[], unsandboxed: string[]}>}
+ *   unsandboxed mode, silencing the warning for them. Set
+ *   `reportUnmatchedUnsandboxed` to false when a caller combines declarations
+ *   from several loaders and reports unmatched names itself.
+ * @returns {Promise<{catalog: Record<string, object>, extensionUrls: Record<string, string>, warnings: string[], ids: string[], unsandboxed: string[], matchedUnsandboxed: string[], unnecessaryUnsandboxed: string[]}>}
  *   `unsandboxed` holds the ids of extensions that only load unsandboxed.
+ *   `matchedUnsandboxed` and `unnecessaryUnsandboxed` let callers combine
+ *   declarations across multiple loaders without double-reporting them.
  */
 export async function loadExtensions(
   list,
-  { baseDir = process.cwd(), fetchImpl, expectUnsandboxed = [] } = {},
+  {
+    baseDir = process.cwd(),
+    fetchImpl,
+    expectUnsandboxed = [],
+    reportUnmatchedUnsandboxed = true,
+  } = {},
 ) {
   const catalog = {};
   const extensionUrls = {};
@@ -941,17 +984,27 @@ export async function loadExtensions(
         "project.unsandboxed in fx.yml once you trust it)",
     );
   }
-  for (const name of declared) {
-    if (declaredNotNeeded.has(name)) {
-      warnings.push(
-        `project.unsandboxed entry "${name}" loads in the sandbox; remove it from fx.yml`,
-      );
-    } else if (!declaredSeen.has(name)) {
-      warnings.push(
-        `project.unsandboxed entry "${name}" does not match any loaded extension`,
-      );
+  if (reportUnmatchedUnsandboxed) {
+    for (const name of declared) {
+      if (declaredNotNeeded.has(name)) {
+        warnings.push(
+          `project.unsandboxed entry "${name}" loads in the sandbox; remove it from fx.yml`,
+        );
+      } else if (!declaredSeen.has(name)) {
+        warnings.push(
+          `project.unsandboxed entry "${name}" does not match any loaded extension`,
+        );
+      }
     }
   }
 
-  return { catalog, extensionUrls, warnings, ids, unsandboxed };
+  return {
+    catalog,
+    extensionUrls,
+    warnings,
+    ids,
+    unsandboxed,
+    matchedUnsandboxed: [...declaredSeen],
+    unnecessaryUnsandboxed: [...declaredNotNeeded],
+  };
 }
