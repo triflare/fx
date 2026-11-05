@@ -34,6 +34,15 @@ export async function addVendor({
       },
     );
 
+  const rawEntry = loaded.raw?.vendor?.[name];
+  const existingVolatile =
+    rawEntry &&
+    typeof rawEntry === "object" &&
+    Object.hasOwn(rawEntry, "volatile")
+      ? Boolean(rawEntry.volatile)
+      : existing?.volatile
+        ? true
+        : undefined;
   const result = await installVendorEntry({
     configPath,
     configDir,
@@ -41,7 +50,7 @@ export async function addVendor({
     source: configSource,
     vendorDir: path.resolve(configDir, loaded.vendorDir || "extensions"),
     unsandboxed: Boolean(options.unsandboxed) || Boolean(existing?.unsandboxed),
-    volatile: existing?.volatile,
+    volatile: existingVolatile,
   });
 
   reporter.success(

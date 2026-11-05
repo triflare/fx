@@ -310,7 +310,12 @@ function assertNoSymlinkPath(start, target, relative) {
   const base = path.resolve(start);
   const absolute = path.resolve(target);
   const suffix = path.relative(base, absolute);
-  if (suffix === "" || suffix.startsWith("..") || path.isAbsolute(suffix))
+  if (
+    suffix === "" ||
+    suffix === ".." ||
+    suffix.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(suffix)
+  )
     return;
   let current = base;
   for (const part of suffix.split(path.sep)) {
@@ -523,6 +528,8 @@ export async function installVendorEntry({
     ...(unsandboxed ? { unsandboxed: true } : {}),
     ...(volatile != null ? { volatile } : {}),
   });
+  const configVolatile =
+    volatile == null ? entry.volatile || undefined : Boolean(volatile);
 
   let buffer;
   let extra = {};
@@ -551,7 +558,7 @@ export async function installVendorEntry({
     wrote = true;
     addVendorEntry(configPath, name, entry.source, {
       unsandboxed: entry.unsandboxed,
-      volatile: entry.volatile,
+      volatile: configVolatile,
     });
     const lockEntry = lockEntryForInstall(name, entry, file, stored, extra);
     currentLock.extensions[name] = lockEntry;
@@ -921,13 +928,18 @@ export async function outdatedVendor({ configDir, config, fetchImpl } = {}) {
     }
 
     try {
+      const sameSource = lockEntry?.source === entry.source;
       const fetched = await fetchVendorSource(entry.source, {
         fetchImpl,
-        etag: lockEntry?.etag,
-        lastModified: lockEntry?.lastModified,
+        etag: sameSource ? lockEntry?.etag : undefined,
+        lastModified: sameSource ? lockEntry?.lastModified : undefined,
       });
       if (fetched.notModified) {
-        results.push({ name: entry.name, status: "current", file });
+        results.push({
+          name: entry.name,
+          status: sameSource ? "current" : "outdated",
+          file,
+        });
         continue;
       }
       results.push({
@@ -1283,7 +1295,7 @@ export async function migrateProjectExtensions({
     for (const item of items)
       addVendorEntry(configPath, item.name, item.source, {
         unsandboxed: item.entry.unsandboxed,
-        volatile: item.entry.volatile,
+        volatile: item.entry.volatile || undefined,
       });
     removeProjectExtensions(configPath);
     writeLock(configDir, lock);

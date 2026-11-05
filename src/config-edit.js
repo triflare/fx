@@ -347,6 +347,28 @@ export function removeProjectExtension(configPath, target) {
 export function removeProjectExtensions(configPath) {
   const text = fs.readFileSync(configPath, "utf8");
   const lines = splitLines(text);
+  const project = topLevel(lines, "project");
+  if (!project) return [];
+  const { value: rest, comment } = splitComment(project.rest);
+
+  if (rest.startsWith("{")) {
+    if (!rest.endsWith("}"))
+      throw new Error("project must be a mapping to edit it");
+    const mapping = parseValue(rest);
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
+      throw new Error("project must be a mapping to edit it");
+    if (!Object.hasOwn(mapping, "extensions")) return [];
+
+    const removed = stringList(mapping.extensions);
+    delete mapping.extensions;
+    const line = lines[project.index];
+    lines[project.index] =
+      `project: ${JSON.stringify(mapping)}` +
+      `${comment ? ` ${comment}` : ""}${ending(line) || eolOf(text)}`;
+    writeDocument(configPath, lines.join(""));
+    return removed;
+  }
+
   const bounds = projectBounds(lines);
   if (!bounds) return [];
   const list = readList(lines, "extensions", bounds.index, bounds.end);
@@ -380,7 +402,8 @@ function quoteKey(key) {
 function vendorEntryLines(name, source, options, indent, eol) {
   const extra = [];
   if (options.unsandboxed) extra.push(`${indent}  unsandboxed: true${eol}`);
-  if (options.volatile) extra.push(`${indent}  volatile: true${eol}`);
+  if (options.volatile !== undefined)
+    extra.push(`${indent}  volatile: ${Boolean(options.volatile)}${eol}`);
   if (extra.length === 0)
     return [`${indent}${quoteKey(name)}: ${quote(source)}${eol}`];
   return [
@@ -481,11 +504,13 @@ export function addVendorEntry(configPath, name, source, options = {}) {
     updated = Object.hasOwn(mapping, key);
     added = !updated;
     mapping[key] =
-      options.unsandboxed || options.volatile
+      options.unsandboxed || options.volatile !== undefined
         ? {
             url: source,
             ...(options.unsandboxed ? { unsandboxed: true } : {}),
-            ...(options.volatile ? { volatile: true } : {}),
+            ...(options.volatile !== undefined
+              ? { volatile: Boolean(options.volatile) }
+              : {}),
           }
         : source;
     const dumped = yaml
