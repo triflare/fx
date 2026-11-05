@@ -99,6 +99,7 @@ export function mergePrograms(
       name: group.name,
       body: [...base, ...fragments].flatMap((decl) => decl.body),
       loc: first.loc,
+      open: first.open ?? null,
       partial: false,
       files: group.files,
     };

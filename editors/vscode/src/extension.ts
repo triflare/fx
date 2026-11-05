@@ -4,6 +4,9 @@ import { FxError } from "../../../src/errors.js";
 import {
   FxQuickFixProvider,
   beginLintRun,
+  invalidateDocument,
+  isInProject,
+  isProjectConfig,
   lintDocument,
   publishDiagnostics,
   publishFailure,
@@ -261,13 +264,25 @@ export function activate(context: vscode.ExtensionContext): void {
       schedule(event.document),
     ),
     vscode.workspace.onDidSaveTextDocument((document) => {
-      void refreshDiagnostics(document, collection);
+      if (document.languageId === LANGUAGE_ID) {
+        void refreshDiagnostics(document, collection);
+        return;
+      }
+      if (!isProjectConfig(document.uri)) return;
+      // Re-run through any open source in the config's project; one run
+      // publishes diagnostics for every open document in it.
+      const projectDocument = vscode.workspace.textDocuments.find(
+        (open) =>
+          open.languageId === LANGUAGE_ID && isInProject(open, document.uri),
+      );
+      if (projectDocument) void refreshDiagnostics(projectDocument, collection);
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       const key = document.uri.toString();
       const pending = debounceTimers.get(key);
       if (pending) clearTimeout(pending);
       debounceTimers.delete(key);
+      invalidateDocument(document.uri);
       collection.delete(document.uri);
     }),
   );

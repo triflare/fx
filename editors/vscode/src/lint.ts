@@ -20,7 +20,8 @@ interface LintDiagnostic {
     kind: string;
     name: string;
     file?: string | null;
-    targetLine?: number;
+    line?: number;
+    column?: number;
     indent?: string;
   };
 }
@@ -28,6 +29,8 @@ interface LintDiagnostic {
 interface LintProject {
   groups: Map<string, LintDiagnostic[]>;
   documents: vscode.TextDocument[];
+  configUri: vscode.Uri | null;
+  configError: string | null;
 }
 
 /** Fix descriptors for the diagnostics currently published, by location. */
@@ -56,6 +59,20 @@ function directoryOf(uri: vscode.Uri): vscode.Uri {
 function isInside(uri: vscode.Uri, root: vscode.Uri): boolean {
   const base = root.path.endsWith("/") ? root.path : `${root.path}/`;
   return uri.path === root.path || uri.path.startsWith(base);
+}
+
+/** Whether `uri` is one of the project configuration files. */
+export function isProjectConfig(uri: vscode.Uri): boolean {
+  const name = uri.path.slice(uri.path.lastIndexOf("/") + 1);
+  return CONFIG_FILES.includes(name);
+}
+
+/** Whether `document` lives under the directory configured by `configUri`. */
+export function isInProject(
+  document: vscode.TextDocument,
+  configUri: vscode.Uri,
+): boolean {
+  return isInside(document.uri, directoryOf(configUri));
 }
 
 async function readText(uri: vscode.Uri): Promise<string> {
@@ -119,39 +136,46 @@ export async function lintDocument(
   }
 
   let parsed: ReturnType<typeof parseProjectConfigText> | null = null;
+  let configError: string | null = null;
   if (configUri) {
     try {
       parsed = parseProjectConfigText(await readText(configUri));
-    } catch {
-      parsed = null;
+      configError = parsed.error ?? null;
+    } catch (error) {
+      configError = error instanceof Error ? error.message : String(error);
     }
   }
 
   const sources = new Map<string, string>();
   if (projectRoot) {
     try {
-      const found = await vscode.workspace.findFiles(
-        new vscode.RelativePattern(projectRoot, "**/*.tfx"),
-        EXCLUDED,
-      );
-      await Promise.all(
+      // Read every project file first, then insert the results in path order
+      // so the merged program does not depend on read completion order.
+      const found = (
+        await vscode.workspace.findFiles(
+          new vscode.RelativePattern(projectRoot, "**/*.tfx"),
+          EXCLUDED,
+        )
+      ).sort((a, b) => a.path.localeCompare(b.path));
+      const texts = await Promise.all(
         found.map(async (uri) => {
           try {
-            sources.set(uri.toString(), await readText(uri));
+            return [uri, await readText(uri)] as const;
           } catch {
             // A file that disappeared between findFiles and read is skipped.
+            return null;
           }
         }),
       );
+      for (const entry of texts)
+        if (entry) sources.set(entry[0].toString(), entry[1]);
     } catch {
       // Workspace search is best effort; open documents still get linted.
     }
   }
-  for (const candidate of projectDocuments) {
-    if (!sources.has(candidate.uri.toString()))
-      sources.set(candidate.uri.toString(), candidate.getText());
-  }
-  sources.set(document.uri.toString(), document.getText());
+  // Open buffers always win over the text on disk, including unsaved edits.
+  for (const candidate of projectDocuments)
+    sources.set(candidate.uri.toString(), candidate.getText());
 
   const result = lintSources({
     sources: [...sources].map(([file, source]) => ({ file, source })),
@@ -169,7 +193,7 @@ export async function lintDocument(
     list.push(diagnostic);
     groups.set(diagnostic.file, list);
   }
-  return { groups, documents: projectDocuments };
+  return { groups, documents: projectDocuments, configUri, configError };
 }
 
 /** Convert one linter diagnostic into a VS Code diagnostic. */
@@ -216,15 +240,37 @@ function clearFixes(uriKey: string): void {
     if (key.startsWith(prefix)) fixes.delete(key);
 }
 
+/** Report a broken `fx.yml`/`fx.yaml` against the config file itself. */
+function configDiagnostic(uri: vscode.Uri, message: string): vscode.Diagnostic {
+  const name = uri.path.slice(uri.path.lastIndexOf("/") + 1) || "fx.yml";
+  const diagnostic = new vscode.Diagnostic(
+    new vscode.Range(0, 0, 0, 0),
+    `Invalid ${name}: ${message}`,
+    vscode.DiagnosticSeverity.Error,
+  );
+  diagnostic.source = LANGUAGE_ID;
+  diagnostic.code = "FX000";
+  return diagnostic;
+}
+
 /**
  * Publish grouped diagnostics for every open document in the project. A run
- * that a newer run has already superseded publishes nothing.
+ * that a newer run has already superseded publishes nothing. A configuration
+ * error is surfaced on the config file, and cleared once it parses again.
  */
 export function publishDiagnostics(
   collection: vscode.DiagnosticCollection,
   project: LintProject,
   runId: number,
 ): void {
+  if (project.configUri && claim(project.configUri.toString(), runId)) {
+    collection.set(
+      project.configUri,
+      project.configError
+        ? [configDiagnostic(project.configUri, project.configError)]
+        : [],
+    );
+  }
   for (const document of project.documents) {
     const key = document.uri.toString();
     if (!claim(key, runId)) continue;
@@ -235,6 +281,17 @@ export function publishDiagnostics(
       diagnostics.map((entry) => toDiagnostic(entry, document)),
     );
   }
+}
+
+/**
+ * Release a closed document: clear its fixes and let any pending run know it
+ * must not publish for it anymore.
+ */
+export function invalidateDocument(uri: vscode.Uri): void {
+  const key = uri.toString();
+  nextRunId += 1;
+  publishedRuns.set(key, nextRunId);
+  clearFixes(key);
 }
 
 /**
@@ -275,17 +332,19 @@ export class FxQuickFixProvider implements vscode.CodeActionProvider {
       );
       if (!fix) continue;
       if (fix.file !== document.uri.toString()) continue;
+      if (fix.line == null || fix.column == null) continue;
       const action = new vscode.CodeAction(
         `Declare \`let ${fix.name} = 0;\``,
         vscode.CodeActionKind.QuickFix,
       );
       action.diagnostics = [diagnostic];
       const edit = new vscode.WorkspaceEdit();
-      const line = Math.max(0, fix.targetLine ?? 1);
+      // The fix records the 1-based opening-brace column; inserting at that
+      // character index puts the declaration immediately inside the block.
       edit.insert(
         document.uri,
-        new vscode.Position(line, 0),
-        `${fix.indent ?? "    "}let ${fix.name} = 0;\n`,
+        new vscode.Position(fix.line - 1, fix.column),
+        `\n${fix.indent ?? "    "}let ${fix.name} = 0;`,
       );
       action.edit = edit;
       actions.push(action);

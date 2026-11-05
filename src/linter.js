@@ -85,7 +85,9 @@ function assetDiagnostics({ sources = [], configPath = null, rootDir = null }) {
     });
   }
 
-  const assetsDir = rootDir ? path.join(rootDir, "assets") : null;
+  // The walk and the referenced set both use absolute paths, so resolve the
+  // project directory even when the caller passed it relative to the cwd.
+  const assetsDir = rootDir ? path.resolve(rootDir, "assets") : null;
   if (
     assetsDir &&
     fs.existsSync(assetsDir) &&

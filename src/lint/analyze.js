@@ -221,7 +221,7 @@ function buildTargets(program) {
     isStage: true,
     loc: stageLoc,
     // Only a real `stage {` block has a brace to insert declarations into.
-    openLine: program.stage ? (program.stage.loc?.line ?? 1) : null,
+    open: program.stage?.open ?? null,
     items: stageItems,
     decls: collectDeclarations(stageItems),
     usage: { vars: new Set(), lists: new Set(), funcs: new Set() },
@@ -230,7 +230,7 @@ function buildTargets(program) {
     name: sprite.name,
     isStage: false,
     loc: sprite.loc,
-    openLine: sprite.loc?.line ?? null,
+    open: sprite.open ?? null,
     items: sprite.body,
     decls: collectDeclarations(sprite.body),
     usage: { vars: new Set(), lists: new Set(), funcs: new Set() },
@@ -627,13 +627,19 @@ class Analyzer {
         {
           length: statement.name.length,
           fix:
-            state.env.target.openLine == null
+            state.env.target.open == null
               ? null
               : {
                   kind: "declare-variable",
                   name: statement.name,
-                  file: state.env.target.loc?.file ?? null,
-                  targetLine: state.env.target.openLine,
+                  file:
+                    state.env.target.open.file ??
+                    state.env.target.loc?.file ??
+                    null,
+                  // 1-based position of the opening brace; the fix inserts
+                  // just after it so a brace on its own line still works.
+                  line: state.env.target.open.line,
+                  column: state.env.target.open.column,
                   indent: "    ",
                 },
         },
@@ -1281,7 +1287,8 @@ export function lintSources({
 
 /**
  * Apply safe, explicit fixes. Today only FX204 (implicit variable) is fixable:
- * the declaration is inserted just inside the target's opening brace.
+ * the declaration is inserted just after the target's opening brace, so the
+ * fix also works when that brace is on its own line.
  *
  * @param {Array<{file: string, source: string}>} sources
  * @param {object[]} diagnostics
@@ -1289,32 +1296,51 @@ export function lintSources({
  */
 export function applyFixes(sources, diagnostics) {
   const textByFile = new Map(sources.map(({ file, source }) => [file, source]));
-  const inserts = new Map(); // file -> Map<line, Set<text>>
+  const inserts = new Map(); // file -> Map<"line:column", {line, column, names}>
   let fixed = 0;
   for (const diagnostic of diagnostics) {
     if (!diagnostic.fix || diagnostic.fix.kind !== "declare-variable") continue;
+    const { file, line, column } = diagnostic.fix;
     if (!diagnostic.file || !textByFile.has(diagnostic.file)) continue;
     // A target in another file has no brace to insert into; never apply a fix
     // to a file other than the one that reported it.
-    if (diagnostic.fix.file !== diagnostic.file) continue;
-    const byLine = inserts.get(diagnostic.file) ?? new Map();
-    const line = diagnostic.fix.targetLine ?? 1;
-    const names = byLine.get(line) ?? new Set();
+    if (file !== diagnostic.file) continue;
+    if (!Number.isInteger(line) || !Number.isInteger(column)) continue;
+    const byPosition = inserts.get(file) ?? new Map();
+    const key = `${line}:${column}`;
+    const insert = byPosition.get(key) ?? {
+      line,
+      column,
+      names: new Set(),
+    };
     const indent = diagnostic.fix.indent ?? "    ";
-    names.add(`${indent}let ${diagnostic.fix.name} = 0;`);
-    byLine.set(line, names);
-    inserts.set(diagnostic.file, byLine);
+    insert.names.add(`${indent}let ${diagnostic.fix.name} = 0;`);
+    byPosition.set(key, insert);
+    inserts.set(file, byPosition);
     fixed += 1;
   }
 
   const files = [];
-  for (const [file, byLine] of inserts) {
-    const lines = textByFile.get(file).split(/\r?\n/);
-    const ordered = [...byLine.entries()].sort((a, b) => b[0] - a[0]);
-    for (const [line, declarations] of ordered) {
-      lines.splice(line, 0, ...declarations);
+  for (const [file, byPosition] of inserts) {
+    const text = textByFile.get(file);
+    // Insertion must not rewrite the file's line endings.
+    const newline = text.includes("\r\n") ? "\r\n" : "\n";
+    const lines = text.split(/\r?\n/);
+    const ordered = [...byPosition.values()].sort(
+      (a, b) => b.line - a.line || b.column - a.column,
+    );
+    for (const { line, column, names } of ordered) {
+      const index = Math.min(Math.max(0, line - 1), lines.length - 1);
+      const current = lines[index];
+      // `column` is the 1-based brace column, which is also the 0-based index
+      // just past the brace character.
+      const offset = Math.min(Math.max(0, column), current.length);
+      const insert = [...names]
+        .map((declaration) => `${newline}${declaration}`)
+        .join("");
+      lines[index] = current.slice(0, offset) + insert + current.slice(offset);
     }
-    textByFile.set(file, lines.join("\n"));
+    textByFile.set(file, lines.join(newline));
     files.push(file);
   }
   return { sources: textByFile, files, fixed };

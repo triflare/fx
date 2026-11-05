@@ -63,7 +63,7 @@ function resolveOptions(options, loaded, product) {
         hint: `run "${product.command} lint --help" for rule selection`,
       });
     if (!parsed.severity) {
-      overrides[rule.id] = "error";
+      overrides[rule.id] = rule.severity;
       continue;
     }
     if (!["error", "warning", "off"].includes(parsed.severity))
@@ -184,15 +184,30 @@ Exit status is 1 when errors are reported, or when warnings are reported with
       overrides,
     };
 
-    let sources = files.map((file) => ({
+    // Analyse the whole project so cross-file declarations resolve, but keep
+    // the selected files separate for reporting, counts and --fix writes.
+    // Diagnostics whose file is not a source (assets, fx.yml) stay visible.
+    const projectDir = state.configDir ?? target.dir;
+    const analysisFiles = discoverSources(projectDir);
+    for (const file of files)
+      if (!analysisFiles.includes(file)) analysisFiles.push(file);
+    const analysisSet = new Set(analysisFiles);
+    const selected = new Set(files);
+    const inScope = (diagnostic) =>
+      diagnostic.file == null ||
+      selected.has(diagnostic.file) ||
+      !analysisSet.has(diagnostic.file);
+
+    let sources = analysisFiles.map((file) => ({
       file,
       source: fs.readFileSync(file, "utf8"),
     }));
     let result = lintSources({ sources, ...lintOptions });
+    let diagnostics = result.diagnostics.filter(inScope);
     let fixed = 0;
 
     if (options.fix) {
-      const applied = applyFixes(sources, result.diagnostics);
+      const applied = applyFixes(sources, diagnostics);
       fixed = applied.fixed;
       if (fixed > 0) {
         for (const file of applied.files)
@@ -202,13 +217,22 @@ Exit status is 1 when errors are reported, or when warnings are reported with
           source: applied.sources.get(file) ?? source,
         }));
         result = lintSources({ sources, ...lintOptions });
+        diagnostics = result.diagnostics.filter(inScope);
       }
     }
 
+    const summary = {
+      errors: diagnostics.filter((entry) => entry.severity === "error").length,
+      warnings: diagnostics.filter((entry) => entry.severity === "warning")
+        .length,
+      suppressed: result.summary.suppressed,
+      files: files.length,
+    };
+
     if (!reporter.json) {
-      reportDiagnostics(reporter, result.diagnostics, cwd);
+      reportDiagnostics(reporter, diagnostics, cwd);
       if (fixed > 0) reporter.info(`Fixed ${plural(fixed, "problem")}.`);
-      const { errors, warnings } = result.summary;
+      const { errors, warnings } = summary;
       if (errors > 0 || warnings > 0) {
         const parts = [];
         if (errors > 0) parts.push(plural(errors, "error"));
@@ -225,8 +249,7 @@ Exit status is 1 when errors are reported, or when warnings are reported with
 
     const failsOnWarnings = Boolean(options.strict);
     const exitCode =
-      result.summary.errors > 0 ||
-      (failsOnWarnings && result.summary.warnings > 0)
+      summary.errors > 0 || (failsOnWarnings && summary.warnings > 0)
         ? EXIT.FAILURE
         : EXIT.OK;
 
@@ -237,8 +260,8 @@ Exit status is 1 when errors are reported, or when warnings are reported with
         strict: failsOnWarnings,
         fixed,
         files: files.map((file) => displayPath(cwd, file)),
-        summary: result.summary,
-        diagnostics: result.diagnostics.map((diagnostic) =>
+        summary,
+        diagnostics: diagnostics.map((diagnostic) =>
           toJsonDiagnostic(diagnostic, cwd),
         ),
       },

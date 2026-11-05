@@ -24,13 +24,16 @@ function run(args, cwd, input) {
   });
 }
 
-/** Strip source locations so two ASTs can be compared structurally. */
+/**
+ * Strip source positions (node `loc` and block-opening brace tokens) so two
+ * ASTs can be compared structurally.
+ */
 function stripLoc(value) {
   if (Array.isArray(value)) return value.map(stripLoc);
   if (value && typeof value === "object") {
     const out = {};
     for (const [key, child] of Object.entries(value))
-      if (key !== "loc") out[key] = stripLoc(child);
+      if (key !== "loc" && key !== "open") out[key] = stripLoc(child);
     return out;
   }
   return value;

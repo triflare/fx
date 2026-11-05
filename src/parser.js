@@ -127,18 +127,31 @@ class Parser {
   parseSprite(partial = false, startTok = null) {
     const tok = this.expect("sprite");
     const name = this.expectType("string", "a sprite name string").value;
-    const body = this.parseBlockBody();
-    return { type: "SpriteDecl", name, body, loc: startTok ?? tok, partial };
+    const { body, open } = this.parseBlockBody(true);
+    return {
+      type: "SpriteDecl",
+      name,
+      body,
+      loc: startTok ?? tok,
+      // Tokens are the brace's position, needed to insert declarations into
+      // the body when the brace is not on the declaration line.
+      open,
+      partial,
+    };
   }
 
   parseStage() {
     const tok = this.expect("stage");
-    const body = this.parseBlockBody();
-    return { type: "StageDecl", name: "Stage", body, loc: tok };
+    const { body, open } = this.parseBlockBody(true);
+    return { type: "StageDecl", name: "Stage", body, loc: tok, open };
   }
 
-  parseBlockBody() {
-    this.expect("{");
+  /**
+   * Parse `{ ... }`.
+   * @param {boolean} [withOpen] return `{body, open}` instead of the items only
+   */
+  parseBlockBody(withOpen = false) {
+    const open = this.expect("{");
     const items = [];
     while (!this.atPunct("}")) {
       if (this.peek().type === "eof")
@@ -146,7 +159,7 @@ class Parser {
       items.push(this.parseBodyItem());
     }
     this.expect("}");
-    return items;
+    return withOpen ? { body: items, open } : items;
   }
 
   parseBodyItem() {

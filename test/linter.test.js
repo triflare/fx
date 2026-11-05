@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { formatSource } from "../src/formatter.js";
-import { lintSources } from "../src/linter.js";
+import { applyFixes, lintSources } from "../src/linter.js";
 import { parseConfig } from "../src/config.js";
 import {
   effectivePreset,
@@ -299,7 +299,8 @@ test("FX204 only offers a fix inside the target that owns the declaration", () =
   }).diagnostics.find((entry) => entry.ruleId === "FX204");
   assert.ok(sprite);
   assert.equal(sprite.fix.file, FILE);
-  assert.equal(sprite.fix.targetLine, 1);
+  assert.equal(sprite.fix.line, 1);
+  assert.equal(sprite.fix.column, 'sprite "Cat" {'.indexOf("{") + 1);
 
   // A stage script without a `stage {` block has no brace to insert into.
   const stage = lintSources({
@@ -307,6 +308,41 @@ test("FX204 only offers a fix inside the target that owns the declaration", () =
   }).diagnostics.find((entry) => entry.ruleId === "FX204");
   assert.ok(stage);
   assert.equal(stage.fix, undefined);
+});
+
+test("FX204 fixes insert after a brace on the next line", () => {
+  const source =
+    'sprite "Cat"\n{\n    when greenFlag {\n        count = 1;\n    }\n}';
+  const diagnostic = lint(source).find((entry) => entry.ruleId === "FX204");
+  assert.ok(diagnostic);
+  assert.equal(diagnostic.fix.line, 2);
+  assert.equal(diagnostic.fix.column, 1);
+  const applied = applyFixes([{ file: FILE, source }], [diagnostic]);
+  assert.match(applied.sources.get(FILE), /\{\n {4}let count = 0;\n/);
+});
+
+test("FX204 fixes stay inside a block closed on the same line", () => {
+  const source = 'sprite "Cat" { when greenFlag { count = 1; } }';
+  const diagnostic = lint(source).find((entry) => entry.ruleId === "FX204");
+  assert.ok(diagnostic);
+  const applied = applyFixes([{ file: FILE, source }], [diagnostic]);
+  assert.equal(
+    applied.sources.get(FILE),
+    'sprite "Cat" {\n    let count = 0; when greenFlag { count = 1; } }',
+  );
+});
+
+test("fixes preserve CRLF line endings", () => {
+  const source =
+    'sprite "Cat" {\r\n    when greenFlag {\r\n        count = 1;\r\n    }\r\n}\r\n';
+  const diagnostics = lint(source);
+  const applied = applyFixes([{ file: FILE, source }], diagnostics);
+  const fixed = applied.sources.get(FILE);
+  assert.ok(
+    fixed.includes("{\r\n    let count = 0;\r\n    when greenFlag"),
+    fixed,
+  );
+  assert.equal(fixed.replace(/\r\n/g, "").includes("\n"), false);
 });
 
 test("editor config reader exposes lint settings", () => {
@@ -508,6 +544,30 @@ test("reports missing, unsupported and unused assets", () => {
   }
 });
 
+test("asset checks resolve a relative rootDir", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "assets"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "assets", "used.svg"), "<svg/>");
+    const source = `sprite "Cat" {
+    costumes: {
+        used: "../assets/used.svg"
+    };
+}`;
+    const result = lintSources({
+      sources: [{ file: path.join(dir, "src", "main.tfx"), source }],
+      rootDir: path.relative(process.cwd(), dir),
+    });
+    assert.deepEqual(
+      result.diagnostics.filter((entry) => entry.ruleId === "FX703"),
+      [],
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("reports unpinned and unavailable extensions", () => {
   const dir = tmp();
   try {
@@ -612,6 +672,47 @@ test("lint --strict keeps a stronger preset and reports it", () => {
     const document = JSON.parse(result.stdout);
     assert.equal(document.data.preset, "all");
     assert.equal(document.data.strict, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a bare --rule enables the rule at its default severity", () => {
+  const dir = project(`sprite "Cat" {
+    let spare = 1;
+
+    when greenFlag {
+        looks.show();
+    }
+}`);
+  try {
+    const result = run(
+      ["lint", "--preset", "minimal", "--rule", "FX208", "--json"],
+      dir,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const [unused] = JSON.parse(result.stdout).data.diagnostics;
+    assert.equal(unused.ruleId, "FX208");
+    assert.equal(unused.severity, "warning");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("linting one file uses the project but reports only that file", () => {
+  const dir = project("stage {\n    let score = 0;\n}\n");
+  try {
+    fs.writeFileSync(
+      path.join(dir, "src", "other.tfx"),
+      'sprite "Cat" {\n    when greenFlag {\n        score = 1;\n        looks.say(score);\n    }\n}\n',
+    );
+    const result = run(["lint", "src/other.tfx", "--json"], dir);
+    assert.equal(result.status, 0, result.stderr);
+    const document = JSON.parse(result.stdout);
+    assert.deepEqual(document.data.files, ["src/other.tfx"]);
+    assert.deepEqual(document.data.diagnostics, []);
+    assert.equal(document.data.summary.files, 1);
+    assert.equal(document.data.summary.errors, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
