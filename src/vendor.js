@@ -310,7 +310,12 @@ function assertNoSymlinkPath(start, target, relative) {
   const base = path.resolve(start);
   const absolute = path.resolve(target);
   const suffix = path.relative(base, absolute);
-  if (suffix === "" || suffix.startsWith("..") || path.isAbsolute(suffix))
+  if (
+    suffix === "" ||
+    suffix === ".." ||
+    suffix.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(suffix)
+  )
     return;
   let current = base;
   for (const part of suffix.split(path.sep)) {
@@ -330,6 +335,16 @@ function assertNoSymlinkPath(start, target, relative) {
 /** Resolve a relative vendor path and enforce the filesystem boundary. */
 function ensureVendorTarget(configDir, vendorDir, relative) {
   const root = path.resolve(vendorDir);
+  const rootInside = path.relative(path.resolve(configDir), root);
+  if (
+    rootInside === "" ||
+    rootInside === ".." ||
+    rootInside.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(rootInside)
+  )
+    throw new VendorError(
+      `Refusing to access vendor directory ${root}: it must be inside the project directory`,
+    );
   const absolute = path.resolve(configDir, relative);
   const inside = path.relative(root, absolute);
   if (

@@ -70,9 +70,12 @@ vendor:
 
 `fx vendor install <url|path> --as <name>` copies the source to `extensions/`, records its SHA-256 in `fx.lock`, and adds it to `fx.yml`. Builds load the vendored copy and embed its source, so no network access is needed after installation. Remote entries fail if their hash changes; `volatile` entries (such as localhost URLs) warn instead. Local paths remain the source of truth and are re-copied on each build with a generated-file header.
 
+`vendorDir` must be a directory inside the project directory.
+
 ```bash
 fx vendor install              # restore from fx.lock, fetching only missing files
-fx vendor update [name]        # show a diff and accept upstream changes
+fx vendor update [name]        # show a diff and write updated files and fx.lock
+fx vendor update [name] --dry-run # preview changes without writing
 fx vendor outdated             # compare upstream with fx.lock
 fx vendor verify               # check files against fx.lock, offline
 fx vendor remove <name>

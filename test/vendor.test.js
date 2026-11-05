@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
 import { loadConfigFrom, parseConfig } from "../src/config.js";
@@ -924,6 +925,48 @@ test("build auto-migrates legacy extensions with --yes and no TTY", () => {
   }
 });
 
+test("dev does not retry a failed migration on rebuild", async () => {
+  const dir = project({
+    config: `project:
+  name: "Auto"
+  extensions:
+    - ./missing.js
+`,
+  });
+  const source = path.join(dir, "stage.tfx");
+  fs.writeFileSync(source, "invalid source\n");
+  const child = spawn(process.execPath, [bin, "dev", "--port", "0", "--yes"], {
+    cwd: dir,
+    env: { ...process.env, FX_NO_PROMPT: "0" },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  const exited = once(child, "exit");
+  let errors = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => (errors += chunk));
+  async function waitForBuilds(count) {
+    const deadline = Date.now() + 10000;
+    while ((errors.match(/Build failed:/g) || []).length < count) {
+      if (child.exitCode !== null || Date.now() > deadline)
+        throw new Error(`Timed out waiting for build ${count}: ${errors}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  try {
+    await waitForBuilds(1);
+    fs.writeFileSync(source, "another invalid source\n");
+    await waitForBuilds(2);
+    assert.equal(
+      (errors.match(/Could not migrate project.extensions:/g) || []).length,
+      1,
+    );
+  } finally {
+    child.kill("SIGTERM");
+    await exited;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("removing a vendor entry keeps following top-level keys", () => {
   const dir = tmp();
   const configPath = path.join(dir, "fx.yml");
@@ -1172,6 +1215,80 @@ test("refuses to write or read through a symlinked vendor directory", async () =
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("rejects vendor roots outside or equal to the project directory", async () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  const configPath = path.join(dir, "fx.yml");
+  const original = fs.readFileSync(configPath, "utf8");
+  try {
+    for (const vendorDir of [".", "..", `${dir}-sibling`, path.dirname(dir)]) {
+      await assert.rejects(
+        installVendorEntry({
+          configPath,
+          configDir: dir,
+          name: "local",
+          source: "./local.js",
+          vendorDir,
+        }),
+        /vendor directory .* must be inside the project directory/,
+      );
+    }
+    assert.equal(fs.readFileSync(configPath, "utf8"), original);
+    assert.equal(fs.existsSync(path.join(dir, "fx.lock")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rejects symlinked ancestors in vendor roots starting with two dots", async () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  const outside = tmp();
+  fs.symlinkSync(outside, path.join(dir, "..deps"), "dir");
+  try {
+    await assert.rejects(
+      installVendorEntry({
+        configPath: path.join(dir, "fx.yml"),
+        configDir: dir,
+        name: "local",
+        source: "./local.js",
+        vendorDir: "..deps/extensions",
+      }),
+      /symbolic link/,
+    );
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("keeps locked targets inside a valid vendor root", async () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  try {
+    for (const file of ["../escaped.js", "other.js"]) {
+      await assert.rejects(
+        installVendorEntry({
+          configPath: path.join(dir, "fx.yml"),
+          configDir: dir,
+          name: "local",
+          source: "./local.js",
+          lock: { extensions: { local: { file } } },
+        }),
+        /outside extensions/,
+      );
+    }
+    const installed = await installVendorEntry({
+      configPath: path.join(dir, "fx.yml"),
+      configDir: dir,
+      name: "local",
+      source: "./local.js",
+      vendorDir: "..deps/extensions",
+    });
+    assert.equal(installed.file, "..deps/extensions/local.js");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

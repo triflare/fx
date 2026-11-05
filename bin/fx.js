@@ -333,6 +333,7 @@ async function loadProjectConfiguration(
       );
     loaded = loadConfigFrom(searchDir);
   } catch (error) {
+    migrationDeclined = true;
     log.warn(`Could not migrate project.extensions: ${error.message}`);
   }
   return loaded;
