@@ -160,7 +160,8 @@ Command groups:
                  Vendor one extension, or restore every entry in ${configFilename(product)}
                  from fx.lock (fetching only missing files).
   vendor update [<name>] [--dry-run]
-                 Re-fetch and show the diff before updating the vendored copy.
+                 Re-fetch, update the vendored copy and show the diff
+                 (use --dry-run to preview without writing).
   vendor outdated
                  Compare upstream sources with fx.lock.
   vendor verify  Check vendored files against fx.lock without the network.
@@ -193,7 +194,7 @@ Options:
   --as <name>     Name for a vendored extension
   --unsandboxed   Mark a vendored extension as requiring unsandboxed mode
   --dry-run       Show vendor update diffs without writing files
-  --yes           Accept migration/update prompts
+  --yes           Accept the migration prompt
   --no-upgrade-prompt  Do not offer to migrate project.extensions
   -v, --version   Print the version
 `;
@@ -214,14 +215,19 @@ function fail(message) {
   process.exit(1);
 }
 
+const CI_VARS = ["CI", "GITHUB_ACTIONS", "TRAVIS", "JENKINS_URL", "CIRCLECI"];
+
+/** True when a real interactive prompt is safe (TTY, not CI, not disabled). */
 function canPrompt(flags = {}) {
   return (
     Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
     !flags["no-upgrade-prompt"] &&
-    process.env.FX_NO_PROMPT !== "1"
+    process.env.FX_NO_PROMPT !== "1" &&
+    !CI_VARS.some((name) => process.env[name])
   );
 }
 
+/** Ask a yes/no question, defaulting to yes on an empty answer. */
 async function askYesNo(question, { yes = false } = {}) {
   if (yes) return true;
   const readline = await import("node:readline/promises");
@@ -237,6 +243,7 @@ async function askYesNo(question, { yes = false } = {}) {
   }
 }
 
+/** Ask for an editable name, falling back on an empty answer. */
 async function askName(question, fallback) {
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({
@@ -252,6 +259,8 @@ async function askName(question, fallback) {
 }
 
 let legacyWarningShown = false;
+let migrationDeclined = false;
+/** Warn once per process that project.extensions is deprecated. */
 function warnLegacyExtensions(config) {
   if (legacyWarningShown) return;
   if (!config || !config.extensions || config.extensions.length === 0) return;
@@ -266,7 +275,11 @@ function warnLegacyExtensions(config) {
  * Load fx.yml and offer to migrate legacy project.extensions. Prompting only
  * happens with a TTY; CI and redirected commands keep the legacy behavior.
  */
-async function loadProjectConfiguration(searchDir, flags = {}) {
+async function loadProjectConfiguration(
+  searchDir,
+  flags = {},
+  { prompt = true } = {},
+) {
   if (flags["no-config"])
     return {
       project: null,
@@ -281,6 +294,7 @@ async function loadProjectConfiguration(searchDir, flags = {}) {
   if (!loaded.path || loaded.project.extensions.length === 0) return loaded;
 
   warnLegacyExtensions(loaded.project);
+  if (!prompt || migrationDeclined) return loaded;
   const autoAccept =
     Boolean(flags.yes) &&
     !flags["no-upgrade-prompt"] &&
@@ -292,7 +306,10 @@ async function loadProjectConfiguration(searchDir, flags = {}) {
     (await askYesNo(`Upgrade project.extensions to the vendor system? [Y/n] `, {
       yes: false,
     }));
-  if (!upgrade) return loaded;
+  if (!upgrade) {
+    migrationDeclined = true;
+    return loaded;
+  }
 
   const configDir = path.dirname(loaded.path);
   try {
@@ -321,17 +338,24 @@ async function loadProjectConfiguration(searchDir, flags = {}) {
   return loaded;
 }
 
+/** Load vendored and legacy extensions and combine their warnings. */
 async function loadProjectExtensions(configDir, loaded) {
   const catalog = {};
   const extensionUrls = {};
   const unsandboxed = [];
   const config = loaded?.project || {};
+  const matchedUnsandboxed = new Set();
+  const unnecessaryUnsandboxed = new Set();
 
   if (loaded?.vendor && loaded.vendor.length > 0) {
     const vendored = await loadVendorExtensions({ configDir, config: loaded });
     Object.assign(catalog, vendored.catalog);
     Object.assign(extensionUrls, vendored.extensionUrls);
     unsandboxed.push(...vendored.unsandboxed);
+    for (const name of vendored.matchedUnsandboxed || [])
+      matchedUnsandboxed.add(name);
+    for (const name of vendored.unnecessaryUnsandboxed || [])
+      unnecessaryUnsandboxed.add(name);
     for (const warning of vendored.warnings)
       process.stderr.write(`warning: ${warning}\n`);
   }
@@ -341,12 +365,29 @@ async function loadProjectExtensions(configDir, loaded) {
     const legacy = await loadExtensions(config.extensions, {
       baseDir: configDir,
       expectUnsandboxed: config.unsandboxed,
+      reportUnmatchedUnsandboxed: false,
     });
     Object.assign(catalog, legacy.catalog);
     Object.assign(extensionUrls, legacy.extensionUrls);
     unsandboxed.push(...legacy.unsandboxed);
+    for (const name of legacy.matchedUnsandboxed || [])
+      matchedUnsandboxed.add(name);
+    for (const name of legacy.unnecessaryUnsandboxed || [])
+      unnecessaryUnsandboxed.add(name);
     for (const warning of legacy.warnings)
       process.stderr.write(`warning: ${warning}\n`);
+  }
+
+  for (const name of new Set(config.unsandboxed || [])) {
+    if (unnecessaryUnsandboxed.has(name)) {
+      process.stderr.write(
+        `warning: project.unsandboxed entry "${name}" loads in the sandbox; remove it from fx.yml\n`,
+      );
+    } else if (!matchedUnsandboxed.has(name)) {
+      process.stderr.write(
+        `warning: project.unsandboxed entry "${name}" does not match any loaded extension\n`,
+      );
+    }
   }
 
   return { catalog, extensionUrls, unsandboxed };
@@ -365,6 +406,7 @@ function resolveInput(input) {
   return stat.isDirectory() ? { dir: resolved } : { file: resolved };
 }
 
+/** Compile project sources into a .pmp archive. */
 async function cmdBuild(args) {
   const target = resolveInput(args._[0]);
   const searchDir = target.file ? path.dirname(target.file) : target.dir;
@@ -435,6 +477,7 @@ function formatBytes(bytes) {
 }
 
 /** Read a `.pmp` directly, or build `.tfx`/directory sources into one. */
+/** Read a .pmp or build sources for the packaging commands. */
 async function readPackagingSource(target, loaded) {
   const searchDir = target.file ? path.dirname(target.file) : target.dir;
   if (target.file && path.extname(target.file).toLowerCase() === ".pmp") {
@@ -465,6 +508,7 @@ async function readPackagingSource(target, loaded) {
   };
 }
 
+/** Package a project into HTML, ZIP or a desktop target. */
 async function cmdPackage(args) {
   const target = resolveInput(args._[0]);
   const loaded = await loadProjectConfiguration(
@@ -523,6 +567,7 @@ async function cmdPackage(args) {
   }
 }
 
+/** Run the live-reloading development server. */
 async function cmdDev(args) {
   const target = resolveInput(args._[0]);
   if (target.file && path.extname(target.file).toLowerCase() === ".pmp")
@@ -625,6 +670,7 @@ async function cmdDev(args) {
   await server.ready;
 }
 
+/** Parse project sources without writing an archive. */
 function cmdCheck(args) {
   const target = resolveInput(args._[0]);
   const files = target.file ? [target.file] : discoverSources(target.dir);
@@ -645,12 +691,14 @@ function cmdCheck(args) {
   log.success(`Checked ${files.length} file(s): OK`);
 }
 
+/** List built-in and project extension blocks. */
 async function cmdCatalog(args) {
   // Merge the built-in catalog with any extensions declared in fx.yml, so
   // blocks from path- or URL-loaded extensions show up here too.
   const loaded = await loadProjectConfiguration(
     args._[0] || process.cwd(),
     args.flags,
+    { prompt: !args.flags.json },
   );
   const extBase = loaded.path ? path.dirname(loaded.path) : process.cwd();
   const { catalog } = await loadProjectExtensions(extBase, loaded);
@@ -1133,6 +1181,7 @@ function vendorConfigSource(source, configDir) {
   return relative.startsWith(".") ? relative : `./${relative}`;
 }
 
+/** Join configured vendor entries with their lock metadata for listing. */
 function vendorEntriesWithLock(loaded, lock, configDir) {
   const dirName = loaded.vendorDir || "extensions";
   const dir = path.resolve(configDir, dirName);
@@ -1153,6 +1202,7 @@ function vendorEntriesWithLock(loaded, lock, configDir) {
   });
 }
 
+/** Install one extension, or restore every configured vendor entry. */
 async function cmdVendorInstall(args) {
   const configPath = requireConfigPath();
   const configDir = path.dirname(configPath);
@@ -1199,7 +1249,9 @@ async function cmdVendorInstall(args) {
     name,
     source: configSource,
     vendorDir: path.resolve(configDir, loaded.vendorDir || "extensions"),
-    unsandboxed: Boolean(args.flags.unsandboxed),
+    unsandboxed:
+      Boolean(args.flags.unsandboxed) || Boolean(existing?.unsandboxed),
+    volatile: existing?.volatile,
   });
   log.success(
     `Vendored ${name} -> ${result.file} (${result.lockEntry.sha256.slice(0, 12)}…)`,
@@ -1208,6 +1260,7 @@ async function cmdVendorInstall(args) {
   else log.success(`Added ${name} to ${path.basename(configPath)}`);
 }
 
+/** Re-fetch vendor sources and optionally preview the diff. */
 async function cmdVendorUpdate(args) {
   const configPath = requireConfigPath();
   const configDir = path.dirname(configPath);
@@ -1238,6 +1291,7 @@ async function cmdVendorUpdate(args) {
   else log.success("Everything is up to date");
 }
 
+/** Report vendor entries whose upstream source changed. */
 async function cmdVendorOutdated() {
   const configPath = requireConfigPath();
   const configDir = path.dirname(configPath);
@@ -1268,6 +1322,7 @@ async function cmdVendorOutdated() {
   if (errors > 0) process.exitCode = 1;
 }
 
+/** Verify vendored files offline against fx.lock. */
 function cmdVendorVerify() {
   const configPath = requireConfigPath();
   const configDir = path.dirname(configPath);
@@ -1290,6 +1345,7 @@ function cmdVendorVerify() {
   );
 }
 
+/** Remove a vendored entry from fx.yml, fx.lock and disk. */
 function cmdVendorRemove(args) {
   const name = args._[1];
   if (!name) fail("vendor remove requires an extension name");
@@ -1308,6 +1364,7 @@ function cmdVendorRemove(args) {
   );
 }
 
+/** List configured vendor entries and their flags. */
 function cmdVendorList(args) {
   const configPath = requireConfigPath();
   const configDir = path.dirname(configPath);
@@ -1347,6 +1404,7 @@ function cmdVendorList(args) {
   }
 }
 
+/** Move legacy project.extensions entries into the vendor system. */
 async function cmdVendorMigrate(args) {
   const configPath = requireConfigPath();
   const configDir = path.dirname(configPath);
@@ -1354,11 +1412,7 @@ async function cmdVendorMigrate(args) {
   if (loaded.project.extensions.length === 0)
     fail(`No project.extensions to migrate in ${path.basename(configPath)}`);
 
-  const interactive =
-    process.stdin.isTTY &&
-    process.stdout.isTTY &&
-    process.env.FX_NO_PROMPT !== "1" &&
-    !args.flags.yes;
+  const interactive = canPrompt(args.flags) && !args.flags.yes;
   const result = await migrateProjectExtensions({
     configPath,
     configDir,
@@ -1376,6 +1430,7 @@ async function cmdVendorMigrate(args) {
     process.stdout.write(`  ${entry.name.padEnd(24)} ${entry.file}\n`);
 }
 
+/** Dispatch the vendor subcommands. */
 async function cmdVendor(args) {
   switch (args._[0]) {
     case "install":
@@ -1383,9 +1438,9 @@ async function cmdVendor(args) {
     case "update":
       return cmdVendorUpdate(args);
     case "outdated":
-      return cmdVendorOutdated(args);
+      return cmdVendorOutdated();
     case "verify":
-      return cmdVendorVerify(args);
+      return cmdVendorVerify();
     case "remove":
       return cmdVendorRemove(args);
     case "list":

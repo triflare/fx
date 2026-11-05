@@ -367,6 +367,7 @@ export function removeProjectExtensions(configPath) {
 
 const SAFE_KEY = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
+/** Quote a mapping key when YAML would otherwise parse it as non-text. */
 function quoteKey(key) {
   // YAML 1.1 treats bare yes/no/on/off/null as non-strings.
   return SAFE_KEY.test(key) &&
@@ -375,6 +376,7 @@ function quoteKey(key) {
     : JSON.stringify(String(key));
 }
 
+/** Serialize one vendor entry, expanding options only when needed. */
 function vendorEntryLines(name, source, options, indent, eol) {
   const extra = [];
   if (options.unsandboxed) extra.push(`${indent}  unsandboxed: true${eol}`);
@@ -388,6 +390,7 @@ function vendorEntryLines(name, source, options, indent, eol) {
   ];
 }
 
+/** Locate a top-level mapping, accepting an inline flow mapping. */
 function topLevelBounds(lines, key) {
   const found = topLevel(lines, key);
   if (!found) return null;
@@ -414,6 +417,7 @@ function topLevelBounds(lines, key) {
   };
 }
 
+/** Find direct child entries and their line ranges in a mapping. */
 function mappingEntrySpans(lines, start, end) {
   const indent = childIndent(lines, start, end);
   const spans = [];
@@ -441,6 +445,7 @@ function mappingEntrySpans(lines, start, end) {
   return spans;
 }
 
+/** Replace a half-open line range in place. */
 function replaceRange(lines, start, end, added) {
   lines.splice(start, end - start, ...added);
 }
@@ -577,9 +582,10 @@ export function removeVendorEntry(configPath, name) {
   }
 
   replaceRange(lines, existing.index, existing.end, []);
-  const remaining = mappingEntrySpans(lines, bounds.index, bounds.end);
+  const end = bounds.end - (existing.end - existing.index);
+  const remaining = mappingEntrySpans(lines, bounds.index, end);
   if (remaining.length === 0) {
-    replaceRange(lines, bounds.index, bounds.end, [`vendor: {}${eol}`]);
+    replaceRange(lines, bounds.index, end, [`vendor: {}${eol}`]);
   }
   writeDocument(configPath, lines.join(""));
   return { removed: source ?? key };

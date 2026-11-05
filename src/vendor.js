@@ -64,6 +64,7 @@ export function relativeVendorPath(configDir, file) {
   return path.relative(configDir, file).split(path.sep).join("/");
 }
 
+/** Normalize a path string to forward slashes for lock/config records. */
 function posix(value) {
   return String(value).replace(/\\/g, "/");
 }
@@ -106,6 +107,7 @@ export function uniqueVendorName(name, used) {
   }
 }
 
+/** True when a mapping looks like a lock entry rather than metadata. */
 function looksLikeLockEntry(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   return ["source", "url", "path", "file", "sha256", "hash", "integrity"].some(
@@ -113,6 +115,7 @@ function looksLikeLockEntry(value) {
   );
 }
 
+/** Normalize legacy lock-entry spellings into the current shape. */
 function normalizeLockEntry(name, raw) {
   const file = raw.file ?? raw.vendored ?? raw.vendorFile ?? raw.vendor_path;
   const source = raw.source ?? raw.url ?? raw.sourcePath ?? raw.source_path;
@@ -203,19 +206,22 @@ export function writeLock(configDir, lock) {
     if (entry.lastModified) clean.lastModified = entry.lastModified;
     out.extensions[name] = clean;
   }
-  fs.writeFileSync(file, `${JSON.stringify(out, null, 2)}\n`);
+  writeFileAtomic(file, `${JSON.stringify(out, null, 2)}\n`);
   return file;
 }
 
+/** Add the generated-from header used for copied local extensions. */
 function localVendoredContent(entry, buffer) {
   const header = `// generated from ${entry.source}, do not edit\n`;
   return Buffer.concat([Buffer.from(header, "utf8"), buffer]);
 }
 
+/** Apply source-specific storage rules before hashing or writing. */
 function storedContent(entry, buffer) {
   return entry.local ? localVendoredContent(entry, buffer) : buffer;
 }
 
+/** Read a local/data source and return its bytes plus resolved file. */
 function readLocalSource(entry, configDir) {
   if (entry.data) {
     const source = readExtensionDataUri(entry.source);
@@ -249,6 +255,7 @@ async function readEntrySource(entry, configDir, fetchImpl) {
   };
 }
 
+/** Build conditional request headers when the lock has validators. */
 function fetchOptions(etag, lastModified) {
   const headers = {};
   if (etag) headers["If-None-Match"] = etag;
@@ -295,6 +302,32 @@ export async function fetchVendorSource(
   };
 }
 
+/**
+ * Reject paths whose existing components include a symbolic link. Walking the
+ * components prevents a lock path from escaping through a linked parent.
+ */
+function assertNoSymlinkPath(start, target, relative) {
+  const base = path.resolve(start);
+  const absolute = path.resolve(target);
+  const suffix = path.relative(base, absolute);
+  if (suffix === "" || suffix.startsWith("..") || path.isAbsolute(suffix))
+    return;
+  let current = base;
+  for (const part of suffix.split(path.sep)) {
+    current = path.join(current, part);
+    const stat = fs.lstatSync(current, { throwIfNoEntry: false });
+    if (!stat) break;
+    if (stat.isSymbolicLink())
+      throw new VendorError(
+        `Refusing to access ${relative}: ${path.relative(
+          base,
+          current,
+        )} is a symbolic link`,
+      );
+  }
+}
+
+/** Resolve a relative vendor path and enforce the filesystem boundary. */
 function ensureVendorTarget(configDir, vendorDir, relative) {
   const root = path.resolve(vendorDir);
   const absolute = path.resolve(configDir, relative);
@@ -310,9 +343,32 @@ function ensureVendorTarget(configDir, vendorDir, relative) {
         root,
       )}`,
     );
+  // Resolve links as well as lexical traversal: a project-controlled lock path
+  // must not escape the vendor directory through a symlinked ancestor.
+  assertNoSymlinkPath(configDir, root, relative);
+  const rootStat = fs.lstatSync(root, { throwIfNoEntry: false });
+  if (rootStat?.isSymbolicLink())
+    throw new VendorError(
+      `Refusing to access ${relative}: ${relativeVendorPath(
+        configDir,
+        root,
+      )} is a symbolic link`,
+    );
+  assertNoSymlinkPath(root, absolute, relative);
   return absolute;
 }
 
+/** Reject a build/restore when the configured source no longer matches. */
+function assertLockSource(entry, lockEntry) {
+  if (!lockEntry?.source || lockEntry.source === entry.source) return;
+  throw new VendorError(
+    `extension "${entry.name}": source changed from ${JSON.stringify(
+      lockEntry.source,
+    )} to ${JSON.stringify(entry.source)}; run "fx vendor update ${entry.name}"`,
+  );
+}
+
+/** Allocate a collision-free, non-existing file name for a vendor entry. */
 function chooseVendorFile(
   configDir,
   vendorDir,
@@ -332,7 +388,11 @@ function chooseVendorFile(
     const relative = posix(
       path.join(relativeVendorPath(configDir, vendorDir), `${stem}.js`),
     );
-    if (!used.has(relative)) return relative;
+    if (used.has(relative)) continue;
+    // Never allocate a path that already exists on disk: untracked files are
+    // not ours to overwrite.
+    if (fs.existsSync(path.resolve(configDir, relative))) continue;
+    return relative;
   }
 }
 
@@ -361,18 +421,45 @@ export function resolveVendorFiles(configDir, vendorDir, entries, lock) {
   return files;
 }
 
-function writeVendorFile(configDir, vendorDir, relative, buffer) {
+/** Replace a file atomically so an interrupted write cannot truncate it. */
+function writeFileAtomic(file, data) {
+  const temp = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  try {
+    fs.writeFileSync(temp, data, { flag: "wx" });
+    fs.renameSync(temp, file);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+}
+
+/**
+ * Write a vendored file after checking containment, symlinks and ownership.
+ * Untracked regular files are never overwritten unless the caller explicitly
+ * identifies them as owned by the lock.
+ */
+function writeVendorFile(
+  configDir,
+  vendorDir,
+  relative,
+  buffer,
+  { allowOverwrite = false } = {},
+) {
   const absolute = ensureVendorTarget(configDir, vendorDir, relative);
   const existing = fs.lstatSync(absolute, { throwIfNoEntry: false });
-  if (existing?.isSymbolicLink())
+  if (existing && !existing.isFile())
     throw new VendorError(
-      `Refusing to write ${relative}: it is a symbolic link`,
+      `Refusing to write ${relative}: it is not a regular file`,
+    );
+  if (existing && !allowOverwrite)
+    throw new VendorError(
+      `Refusing to overwrite ${relative}: it is not recorded in ${LOCK_FILENAME}`,
     );
   fs.mkdirSync(path.dirname(absolute), { recursive: true });
-  fs.writeFileSync(absolute, buffer);
+  writeFileAtomic(absolute, buffer);
   return absolute;
 }
 
+/** Build the lock record for a source's stored bytes. */
 function lockEntryForInstall(name, entry, file, buffer, extra = {}) {
   return {
     name,
@@ -438,15 +525,33 @@ export async function installVendorEntry({
   const previous = currentLock.extensions[name];
   const file =
     previous?.file || chooseVendorFile(configDir, dir, name, currentLock);
-  writeVendorFile(configDir, dir, file, stored);
-  addVendorEntry(configPath, name, entry.source, {
-    unsandboxed: entry.unsandboxed,
-    volatile: entry.volatile,
-  });
-  const lockEntry = lockEntryForInstall(name, entry, file, stored, extra);
-  currentLock.extensions[name] = lockEntry;
-  writeLock(configDir, currentLock);
-  return { entry, lockEntry, file };
+  const absolute = ensureVendorTarget(configDir, dir, file);
+  const existing = fs.lstatSync(absolute, { throwIfNoEntry: false });
+  const before = existing?.isFile() ? fs.readFileSync(absolute) : null;
+  const configBefore = fs.readFileSync(configPath, "utf8");
+  let wrote = false;
+
+  try {
+    writeVendorFile(configDir, dir, file, stored, {
+      allowOverwrite: Boolean(previous),
+    });
+    wrote = true;
+    addVendorEntry(configPath, name, entry.source, {
+      unsandboxed: entry.unsandboxed,
+      volatile: entry.volatile,
+    });
+    const lockEntry = lockEntryForInstall(name, entry, file, stored, extra);
+    currentLock.extensions[name] = lockEntry;
+    writeLock(configDir, currentLock);
+    return { entry, lockEntry, file };
+  } catch (error) {
+    if (wrote) {
+      if (before) fs.writeFileSync(absolute, before);
+      else fs.rmSync(absolute, { force: true });
+    }
+    fs.writeFileSync(configPath, configBefore);
+    throw error;
+  }
 }
 
 /**
@@ -463,87 +568,113 @@ export async function installVendor({ configDir, config, fetchImpl } = {}) {
   const files = resolveVendorFiles(configDir, vendorDir, entries, lock);
   const warnings = [];
   const results = [];
+  const backups = new Map();
+  const remember = (absolute) => {
+    if (backups.has(absolute)) return;
+    const existing = fs.lstatSync(absolute, { throwIfNoEntry: false });
+    backups.set(absolute, {
+      existed: Boolean(existing),
+      buffer: existing?.isFile() ? fs.readFileSync(absolute) : Buffer.alloc(0),
+    });
+  };
 
-  for (const entry of entries) {
-    const { file, lockEntry: previous } = files.get(entry.name);
+  try {
+    for (const entry of entries) {
+      const { file, lockEntry: previous } = files.get(entry.name);
 
-    if (entry.local || entry.data) {
-      const local = readLocalSource(entry, configDir);
-      const stored = storedContent(entry, local.buffer);
-      writeVendorFile(configDir, vendorDir, file, stored);
-      lock.extensions[entry.name] = lockEntryForInstall(
-        entry.name,
-        entry,
-        file,
-        stored,
-      );
-      results.push({
-        name: entry.name,
-        file,
-        status: entry.local ? "copied" : "verified",
-      });
-      continue;
-    }
-
-    const absolute = ensureVendorTarget(configDir, vendorDir, file);
-    if (fs.existsSync(absolute)) {
-      const buffer = fs.readFileSync(absolute);
-      const hash = sha256(buffer);
-      if (previous?.sha256 && hash !== previous.sha256) {
-        if (entry.volatile || previous.volatile) {
-          warnings.push(
-            `extension "${entry.name}" changed in ${file}; volatile entry accepted`,
-          );
-          lock.extensions[entry.name] = {
-            ...previous,
-            sha256: hash,
-            fetched: new Date().toISOString(),
-          };
-        } else {
-          throw new VendorError(
-            `extension "${entry.name}" in ${file} does not match ${LOCK_FILENAME}; ` +
-              'the vendored copy changed. Run "fx vendor update ' +
-              `${entry.name}" to accept it, or restore the file`,
-          );
-        }
-      } else if (!previous?.sha256) {
+      if (entry.local || entry.data) {
+        const local = readLocalSource(entry, configDir);
+        const stored = storedContent(entry, local.buffer);
+        const absolute = ensureVendorTarget(configDir, vendorDir, file);
+        remember(absolute);
+        writeVendorFile(configDir, vendorDir, file, stored, {
+          allowOverwrite: Boolean(previous),
+        });
         lock.extensions[entry.name] = lockEntryForInstall(
           entry.name,
           entry,
           file,
-          buffer,
+          stored,
         );
+        results.push({
+          name: entry.name,
+          file,
+          status: entry.local ? "copied" : "verified",
+        });
+        continue;
       }
-      results.push({ name: entry.name, file, status: "verified" });
-      continue;
+
+      const absolute = ensureVendorTarget(configDir, vendorDir, file);
+      assertLockSource(entry, previous);
+      if (fs.existsSync(absolute)) {
+        const buffer = fs.readFileSync(absolute);
+        const hash = sha256(buffer);
+        if (previous?.sha256 && hash !== previous.sha256) {
+          if (entry.volatile) {
+            warnings.push(
+              `extension "${entry.name}" changed in ${file}; volatile entry accepted`,
+            );
+            lock.extensions[entry.name] = {
+              ...previous,
+              sha256: hash,
+              fetched: new Date().toISOString(),
+            };
+          } else {
+            throw new VendorError(
+              `extension "${entry.name}" in ${file} does not match ${LOCK_FILENAME}; ` +
+                'the vendored copy changed. Run "fx vendor update ' +
+                `${entry.name}" to accept it, or restore the file`,
+            );
+          }
+        } else if (!previous?.sha256) {
+          lock.extensions[entry.name] = lockEntryForInstall(
+            entry.name,
+            entry,
+            file,
+            buffer,
+          );
+        }
+        results.push({ name: entry.name, file, status: "verified" });
+        continue;
+      }
+
+      const read = await readEntrySource(entry, configDir, fetchImpl);
+      const hash = sha256(read.buffer);
+      if (previous?.sha256 && hash !== previous.sha256) {
+        if (entry.volatile) {
+          warnings.push(
+            `extension "${entry.name}" changed upstream; volatile entry accepted`,
+          );
+        } else {
+          throw new VendorError(
+            `extension "${entry.name}" changed upstream while restoring ${LOCK_FILENAME}. ` +
+              `Run "fx vendor update ${entry.name}" to accept the new source`,
+          );
+        }
+      }
+      remember(absolute);
+      writeVendorFile(configDir, vendorDir, file, read.buffer, {
+        allowOverwrite: Boolean(previous),
+      });
+      lock.extensions[entry.name] = lockEntryForInstall(
+        entry.name,
+        entry,
+        file,
+        read.buffer,
+        read.extra,
+      );
+      results.push({ name: entry.name, file, status: "fetched" });
     }
 
-    const read = await readEntrySource(entry, configDir, fetchImpl);
-    const hash = sha256(read.buffer);
-    if (previous?.sha256 && hash !== previous.sha256) {
-      if (entry.volatile || previous.volatile) {
-        warnings.push(
-          `extension "${entry.name}" changed upstream; volatile entry accepted`,
-        );
-      } else {
-        throw new VendorError(
-          `extension "${entry.name}" changed upstream while restoring ${LOCK_FILENAME}. ` +
-            `Run "fx vendor update ${entry.name}" to accept the new source`,
-        );
-      }
+    writeLock(configDir, lock);
+  } catch (error) {
+    for (const [absolute, backup] of backups) {
+      if (backup.existed) fs.writeFileSync(absolute, backup.buffer);
+      else fs.rmSync(absolute, { force: true });
     }
-    writeVendorFile(configDir, vendorDir, file, read.buffer);
-    lock.extensions[entry.name] = lockEntryForInstall(
-      entry.name,
-      entry,
-      file,
-      read.buffer,
-      read.extra,
-    );
-    results.push({ name: entry.name, file, status: "fetched" });
+    throw error;
   }
 
-  writeLock(configDir, lock);
   return { lock, warnings, entries: results };
 }
 
@@ -573,14 +704,14 @@ export async function updateVendor({
 
   const results = [];
   const warnings = [];
+  const pending = [];
   let changed = 0;
 
   for (const entry of selected) {
-    const { file } = files.get(entry.name);
+    const { file, lockEntry } = files.get(entry.name);
     const absolute = ensureVendorTarget(configDir, vendorDir, file);
-    const before = fs.existsSync(absolute)
-      ? fs.readFileSync(absolute)
-      : Buffer.alloc(0);
+    const existed = fs.existsSync(absolute);
+    const before = existed ? fs.readFileSync(absolute) : Buffer.alloc(0);
 
     let after;
     let extra = {};
@@ -593,29 +724,62 @@ export async function updateVendor({
     }
 
     const different = !after.equals(before);
+    const sourceChanged = lockEntry?.source !== entry.source;
     results.push({
       name: entry.name,
       file,
       changed: different,
+      sourceChanged,
       diff: different
         ? formatDiff(before.toString("utf8"), after.toString("utf8"), file)
         : "",
     });
-    if (!different) continue;
-    changed += 1;
-    if (write) {
-      writeVendorFile(configDir, vendorDir, file, after);
-      lock.extensions[entry.name] = lockEntryForInstall(
-        entry.name,
-        entry,
-        file,
-        after,
-        extra,
-      );
+    if (!different && !sourceChanged) continue;
+    if (different) changed += 1;
+    pending.push({
+      entry,
+      file,
+      absolute,
+      existed,
+      before,
+      after,
+      extra,
+      different,
+      lockEntry,
+    });
+  }
+
+  if (write && pending.length > 0) {
+    const backups = new Map();
+    try {
+      for (const item of pending) {
+        if (!item.different) continue;
+        backups.set(item.absolute, {
+          existed: item.existed,
+          buffer: item.before,
+        });
+        writeVendorFile(configDir, vendorDir, item.file, item.after, {
+          allowOverwrite: Boolean(item.lockEntry),
+        });
+      }
+      for (const item of pending)
+        lock.extensions[item.entry.name] = lockEntryForInstall(
+          item.entry.name,
+          item.entry,
+          item.file,
+          item.after,
+          item.extra,
+        );
+      writeLock(configDir, lock);
+    } catch (error) {
+      for (const [absolute, backup] of backups) {
+        if (backup.existed) fs.writeFileSync(absolute, backup.buffer);
+        else fs.rmSync(absolute, { force: true });
+      }
+      throw error;
     }
   }
 
-  if (write && changed > 0) writeLock(configDir, lock);
   return { entries: results, warnings, changed, lock };
 }
 
@@ -680,7 +844,7 @@ export function verifyVendor({ configDir, config } = {}) {
       continue;
     }
     if (hash !== lockEntry.sha256) {
-      if (entry.volatile || lockEntry.volatile) {
+      if (entry.volatile) {
         warnings.push(
           `extension "${entry.name}": ${file} differs from ${LOCK_FILENAME}; ` +
             "volatile entry accepted",
@@ -795,12 +959,12 @@ export function removeVendoredExtension({
   const lock = readLock(configDir);
   const files = resolveVendorFiles(configDir, vendorDir, entries, lock);
   const { file } = files.get(target);
+  const absolute = ensureVendorTarget(configDir, vendorDir, file);
 
   const result = removeVendorEntry(configPath, target);
   delete lock.extensions[target];
   writeLock(configDir, lock);
 
-  const absolute = ensureVendorTarget(configDir, vendorDir, file);
   const stillUsed = Object.values(lock.extensions).some(
     (candidate) => candidate.file === file,
   );
@@ -849,7 +1013,10 @@ export async function loadVendorExtensions({
         lockEntry.file !== file ||
         Boolean(lockEntry.local) !== Boolean(entry.local) ||
         Boolean(lockEntry.volatile) !== Boolean(entry.volatile);
-      if (needsWrite) writeVendorFile(configDir, vendorDir, file, stored);
+      if (needsWrite)
+        writeVendorFile(configDir, vendorDir, file, stored, {
+          allowOverwrite: Boolean(lockEntry),
+        });
       if (needsWrite || needsLock) {
         lock.extensions[entry.name] = lockEntryForInstall(
           entry.name,
@@ -863,12 +1030,13 @@ export async function loadVendorExtensions({
       continue;
     }
 
+    assertLockSource(entry, lockEntry);
     let buffer;
     if (fs.existsSync(absolute)) {
       buffer = fs.readFileSync(absolute);
       const hash = sha256(buffer);
       if (lockEntry?.sha256 && hash !== lockEntry.sha256) {
-        if (entry.volatile || lockEntry.volatile) {
+        if (entry.volatile) {
           warnings.push(
             `extension "${entry.name}" changed in ${file}; volatile entry accepted`,
           );
@@ -892,7 +1060,7 @@ export async function loadVendorExtensions({
       const read = await readEntrySource(entry, configDir, fetchImpl);
       const hash = sha256(read.buffer);
       if (lockEntry?.sha256 && hash !== lockEntry.sha256) {
-        if (entry.volatile || lockEntry.volatile) {
+        if (entry.volatile) {
           warnings.push(
             `extension "${entry.name}" changed upstream; volatile entry accepted`,
           );
@@ -904,7 +1072,9 @@ export async function loadVendorExtensions({
         }
       }
       buffer = read.buffer;
-      writeVendorFile(configDir, vendorDir, file, buffer);
+      writeVendorFile(configDir, vendorDir, file, buffer, {
+        allowOverwrite: Boolean(lockEntry),
+      });
       lock.extensions[entry.name] = lockEntryForInstall(
         entry.name,
         entry,
@@ -931,12 +1101,15 @@ export async function loadVendorExtensions({
       baseDir: configDir,
       fetchImpl,
       expectUnsandboxed,
+      reportUnmatchedUnsandboxed: false,
     },
   );
 
   return {
     ...loaded,
     warnings: [...warnings, ...loaded.warnings],
+    matchedUnsandboxed: loaded.matchedUnsandboxed,
+    unnecessaryUnsandboxed: loaded.unnecessaryUnsandboxed,
     files: files.map(({ file }) => file),
     entries,
     lock,
@@ -1068,18 +1241,23 @@ export async function migrateProjectExtensions({
   const original = fs.readFileSync(configPath, "utf8");
   const backup = `${configPath}.bak`;
   fs.writeFileSync(backup, original);
+  const lockPath = path.join(configDir, LOCK_FILENAME);
+  const lockBefore = fs.existsSync(lockPath) ? fs.readFileSync(lockPath) : null;
 
   const migrated = [];
   const written = [];
   try {
     for (const item of items) {
-      const buffer = Buffer.from(item.resolved.source, "utf8");
+      const buffer =
+        item.resolved.buffer ?? Buffer.from(item.resolved.source, "utf8");
       const stored = storedContent(item.entry, buffer);
       const file = chooseVendorFile(configDir, vendorDir, item.name, lock);
       const absolute = ensureVendorTarget(configDir, vendorDir, file);
-      const existed = fs.existsSync(absolute);
+      const existing = fs.lstatSync(absolute, { throwIfNoEntry: false });
+      const existed = Boolean(existing);
+      const before = existing?.isFile() ? fs.readFileSync(absolute) : null;
       writeVendorFile(configDir, vendorDir, file, stored);
-      written.push({ absolute, existed });
+      written.push({ absolute, existed, before });
       lock.extensions[item.name] = lockEntryForInstall(
         item.name,
         item.entry,
@@ -1098,8 +1276,12 @@ export async function migrateProjectExtensions({
     writeLock(configDir, lock);
   } catch (error) {
     fs.writeFileSync(configPath, original);
-    for (const { absolute, existed } of written.reverse())
-      if (!existed) fs.rmSync(absolute, { force: true });
+    for (const { absolute, existed, before } of written.reverse()) {
+      if (existed && before) fs.writeFileSync(absolute, before);
+      else if (!existed) fs.rmSync(absolute, { force: true });
+    }
+    if (lockBefore) fs.writeFileSync(lockPath, lockBefore);
+    else fs.rmSync(lockPath, { force: true });
     throw error;
   }
 
