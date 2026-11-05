@@ -8,6 +8,7 @@
  */
 export { tokenize } from "./lexer.js";
 export { parse } from "./parser.js";
+export { formatSource } from "./formatter.js";
 export { Compiler, compile } from "./compiler.js";
 export { build, writeSb3 } from "./build.js";
 export { discoverSources, mergePrograms } from "./project.js";

@@ -52,13 +52,28 @@ const isDigit = (ch) => ch >= "0" && ch <= "9";
  */
 
 /**
- * Tokenize a Triflare Fx source string.
+ * @typedef {object} Comment
+ * @property {string} text the raw comment, including its delimiters
+ * @property {number} line
+ * @property {number} column
+ * @property {number} after index of the token that follows the comment
+ */
+
+/**
+ * Tokenize a Triflare Fx source string and record its comments.
+ *
+ * Comments stay out of the token stream, but the formatter needs them to put
+ * source comments back into a canonical layout. `after` is the index of the
+ * next token, so a comment can be re-attached between tokens even after the
+ * whitespace around it changes.
+ *
  * @param {string} source
  * @param {string} [file]
- * @returns {Token[]}
+ * @returns {{tokens: Token[], comments: Comment[]}}
  */
-export function tokenize(source, file = "<input>") {
+export function tokenizeWithComments(source, file = "<input>") {
   const tokens = [];
+  const comments = [];
   let i = 0;
   let line = 1;
   let column = 1;
@@ -99,10 +114,20 @@ export function tokenize(source, file = "<input>") {
 
     // --- comments -------------------------------------------------------
     if (ch === "/" && source[i + 1] === "/") {
+      const startIndex = i;
+      const startLine = line;
+      const startColumn = column;
       while (i < source.length && source[i] !== "\n") advance();
+      comments.push({
+        text: source.slice(startIndex, i),
+        line: startLine,
+        column: startColumn,
+        after: tokens.length,
+      });
       continue;
     }
     if (ch === "/" && source[i + 1] === "*") {
+      const startIndex = i;
       const startLine = line;
       const startColumn = column;
       advance(2);
@@ -111,6 +136,12 @@ export function tokenize(source, file = "<input>") {
       if (i >= source.length)
         fail("Unterminated block comment", startLine, startColumn);
       advance(2);
+      comments.push({
+        text: source.slice(startIndex, i),
+        line: startLine,
+        column: startColumn,
+        after: tokens.length,
+      });
       continue;
     }
 
@@ -198,5 +229,15 @@ export function tokenize(source, file = "<input>") {
   }
 
   push("eof", "", line, column);
-  return tokens;
+  return { tokens, comments };
+}
+
+/**
+ * Tokenize a Triflare Fx source string.
+ * @param {string} source
+ * @param {string} [file]
+ * @returns {Token[]}
+ */
+export function tokenize(source, file = "<input>") {
+  return tokenizeWithComments(source, file).tokens;
 }

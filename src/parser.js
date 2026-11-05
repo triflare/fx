@@ -248,15 +248,16 @@ class Parser {
       const ptok = this.peek();
       const paramName = this.expectIdent();
       let boolean = false;
+      let type = null;
       // Optional type annotation: `flag: boolean`
       if (this.eat(":")) {
-        const typeName = this.expectIdent();
-        if (typeName === "boolean") boolean = true;
-        else if (typeName !== "number" && typeName !== "string") {
-          this.fail(`Unknown parameter type ${JSON.stringify(typeName)}`, ptok);
+        type = this.expectIdent();
+        if (type === "boolean") boolean = true;
+        else if (type !== "number" && type !== "string") {
+          this.fail(`Unknown parameter type ${JSON.stringify(type)}`, ptok);
         }
       }
-      params.push({ name: paramName, boolean });
+      params.push({ name: paramName, boolean, type });
       if (!this.eat(",")) break;
     }
     this.expect(")");
@@ -603,6 +604,16 @@ class Parser {
  * @param {string} [file]
  */
 export function parse(source, file = "<input>") {
-  const tokens = tokenize(source, file);
+  return parseTokens(tokenize(source, file), source, file);
+}
+
+/**
+ * Parse an existing token stream. Keeping the caller's tokens lets tools such
+ * as the formatter match AST locations back to tokens without re-lexing.
+ * @param {import('./lexer.js').Token[]} tokens
+ * @param {string} source
+ * @param {string} [file]
+ */
+export function parseTokens(tokens, source, file = "<input>") {
   return new Parser(tokens, source, file).parse();
 }

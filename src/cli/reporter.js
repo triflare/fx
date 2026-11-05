@@ -151,6 +151,15 @@ export function createReporter({
       stdout.write(`${message}\n`);
     },
 
+    /**
+     * Unmodified product output, such as formatted source. Quiet does not
+     * suppress it because it is the command's result; JSON mode does.
+     */
+    raw(text) {
+      if (json) return;
+      stdout.write(String(text));
+    },
+
     /** Quiet, de-emphasized line for incidental notes. */
     note(message) {
       if (!human) return;
