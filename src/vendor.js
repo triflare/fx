@@ -945,7 +945,9 @@ export async function outdatedVendor({ configDir, config, fetchImpl } = {}) {
       results.push({
         name: entry.name,
         status:
-          lockEntry?.sha256 && sha256(fetched.buffer) === lockEntry.sha256
+          sameSource &&
+          lockEntry?.sha256 &&
+          sha256(fetched.buffer) === lockEntry.sha256
             ? "current"
             : "outdated",
         file,

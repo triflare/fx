@@ -622,6 +622,12 @@ test("outdated sends conditional headers and honours 304 responses", async () =>
       seen.headers["If-Modified-Since"],
       "Wed, 01 Jan 2025 00:00:00 GMT",
     );
+    const sameBytes = await outdatedVendor({
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      fetchImpl,
+    });
+    assert.equal(sameBytes[0].status, "current");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -668,7 +674,7 @@ test("outdated ignores validators from a changed source", async () => {
         status: 200,
         statusText: "OK",
         headers: { get: () => null },
-        arrayBuffer: async () => Buffer.from(`${SIGNALS}\n// changed\n`),
+        arrayBuffer: async () => Buffer.from(SIGNALS),
       };
     };
     const results = await outdatedVendor({
@@ -1513,6 +1519,34 @@ test("reinstall preserves an explicit volatile: false flag", () => {
     assert.equal(loadConfigFrom(dir).vendor[0].volatile, false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("replacement uses its own volatile default unless explicitly configured", () => {
+  for (const [entry, expected] of [
+    ["http://localhost:8080/old.js", undefined],
+    ["{ url: http://localhost:8080/old.js }", undefined],
+    ["{ url: http://localhost:8080/old.js, volatile: null }", undefined],
+    ["{ url: http://localhost:8080/old.js, volatile: false }", false],
+    ["{ url: http://localhost:8080/old.js, volatile: true }", true],
+  ]) {
+    const dir = project({
+      config: `project:\n  name: "Vendor"\nvendor:\n  local: ${entry}\n`,
+      extensions: { "local.js": SIGNALS },
+    });
+    try {
+      const result = run(
+        ["vendor", "install", "./local.js", "--as", "local", "--force"],
+        dir,
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const loaded = loadConfigFrom(dir);
+      assert.equal(loaded.raw.vendor.local?.volatile, expected, entry);
+      assert.equal(loaded.vendor[0].volatile, expected ?? false, entry);
+      assert.equal(readLock(dir).extensions.local.volatile, expected ?? false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
 });
 

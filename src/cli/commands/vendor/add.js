@@ -38,11 +38,10 @@ export async function addVendor({
   const existingVolatile =
     rawEntry &&
     typeof rawEntry === "object" &&
-    Object.hasOwn(rawEntry, "volatile")
+    Object.hasOwn(rawEntry, "volatile") &&
+    rawEntry.volatile != null
       ? Boolean(rawEntry.volatile)
-      : existing?.volatile
-        ? true
-        : undefined;
+      : undefined;
   const result = await installVendorEntry({
     configPath,
     configDir,
