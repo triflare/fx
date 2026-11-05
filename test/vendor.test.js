@@ -923,3 +923,316 @@ test("build auto-migrates legacy extensions with --yes and no TTY", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("removing a vendor entry keeps following top-level keys", () => {
+  const dir = tmp();
+  const configPath = path.join(dir, "fx.yml");
+  write(
+    configPath,
+    `project:
+  name: "Demo"
+vendor:
+  signals: "https://example.test/signals.js"
+vendorDir: deps/extensions
+package:
+  target: html
+`,
+  );
+  try {
+    removeVendorEntry(configPath, "signals");
+    const text = fs.readFileSync(configPath, "utf8");
+    assert.match(text, /vendor: \{\}/);
+    assert.match(text, /vendorDir: deps\/extensions/);
+    assert.match(text, /package:\n {2}target: html/);
+    const parsed = parseConfig(text);
+    assert.deepEqual(parsed.vendor, []);
+    assert.equal(parsed.vendorDir, "deps/extensions");
+    assert.equal(parsed.package.target, "html");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("builds install and verify reject a changed source", async () => {
+  const dir = project({
+    config: `project:
+  name: "Vendor"
+vendor:
+  signals: https://example.test/signals.js
+`,
+  });
+  const configPath = path.join(dir, "fx.yml");
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: () => null },
+    arrayBuffer: async () => Buffer.from(SIGNALS),
+  });
+  try {
+    await installVendorEntry({
+      configPath,
+      configDir: dir,
+      name: "signals",
+      source: "https://example.test/signals.js",
+      fetchImpl,
+    });
+    write(
+      configPath,
+      `project:
+  name: "Vendor"
+vendor:
+  signals: https://mirror.test/signals.js
+`,
+    );
+    const changed = loadConfigFrom(dir);
+    await assert.rejects(
+      loadVendorExtensions({
+        configDir: dir,
+        config: changed,
+        fetchImpl: () => {
+          throw new Error("should not fetch old bytes");
+        },
+      }),
+      /source changed/,
+    );
+    await assert.rejects(
+      installVendor({ configDir: dir, config: changed, fetchImpl }),
+      /source changed/,
+    );
+    const verified = verifyVendor({ configDir: dir, config: changed });
+    assert.equal(verified.ok, false);
+    assert.match(verified.problems.join("\n"), /source changed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tightening volatile rejects the previously accepted change", async () => {
+  const dir = project({
+    config: `project:
+  name: "Vendor"
+vendor:
+  flaky:
+    url: https://example.test/flaky.js
+    volatile: true
+`,
+  });
+  const configPath = path.join(dir, "fx.yml");
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: () => null },
+    arrayBuffer: async () => Buffer.from(SIGNALS),
+  });
+  try {
+    await installVendorEntry({
+      configPath,
+      configDir: dir,
+      name: "flaky",
+      source: "https://example.test/flaky.js",
+      fetchImpl,
+      volatile: true,
+    });
+    fs.appendFileSync(
+      path.join(dir, "extensions", "flaky.js"),
+      "\n// local tweak\n",
+    );
+    write(
+      configPath,
+      `project:
+  name: "Vendor"
+vendor:
+  flaky: https://example.test/flaky.js
+`,
+    );
+    const tightened = loadConfigFrom(dir);
+    await assert.rejects(
+      loadVendorExtensions({ configDir: dir, config: tightened, fetchImpl }),
+      /does not match fx\.lock/,
+    );
+    assert.equal(verifyVendor({ configDir: dir, config: tightened }).ok, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("update refreshes a source-only lock change", async () => {
+  const dir = project({
+    config: `project:
+  name: "Vendor"
+vendor:
+  signals: https://example.test/signals.js
+`,
+  });
+  const configPath = path.join(dir, "fx.yml");
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: () => null },
+    arrayBuffer: async () => Buffer.from(SIGNALS),
+  });
+  const vendored = path.join(dir, "extensions", "signals.js");
+  try {
+    await installVendorEntry({
+      configPath,
+      configDir: dir,
+      name: "signals",
+      source: "https://example.test/signals.js",
+      fetchImpl,
+    });
+    const original = fs.readFileSync(vendored);
+    write(
+      configPath,
+      `project:
+  name: "Vendor"
+vendor:
+  signals: https://mirror.test/signals.js
+`,
+    );
+    const changed = loadConfigFrom(dir);
+    const result = await updateVendor({
+      configDir: dir,
+      config: changed,
+      fetchImpl,
+    });
+    assert.equal(result.changed, 0);
+    assert.equal(result.entries[0].sourceChanged, true);
+    assert.equal(
+      readLock(dir).extensions.signals.source,
+      "https://mirror.test/signals.js",
+    );
+    assert.deepEqual(fs.readFileSync(vendored), original);
+    assert.equal(verifyVendor({ configDir: dir, config: changed }).ok, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("migration locks raw remote bytes for BOM restores", async () => {
+  const dir = project({
+    config: `project:
+  name: "Migrate"
+  extensions:
+    - https://example.test/signals.js
+`,
+  });
+  const configPath = path.join(dir, "fx.yml");
+  const bom = Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from(SIGNALS),
+  ]);
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: () => null },
+    arrayBuffer: async () => bom,
+  });
+  const vendored = path.join(dir, "extensions", "signals.js");
+  try {
+    await migrateProjectExtensions({
+      configPath,
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      fetchImpl,
+    });
+    assert.equal(readLock(dir).extensions.signals.sha256, sha256(bom));
+    assert.deepEqual(fs.readFileSync(vendored), bom);
+
+    fs.rmSync(vendored);
+    await loadVendorExtensions({
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      fetchImpl,
+    });
+    assert.deepEqual(fs.readFileSync(vendored), bom);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("refuses to write or read through a symlinked vendor directory", async () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  const outside = tmp();
+  fs.symlinkSync(outside, path.join(dir, "extensions"), "dir");
+  try {
+    await assert.rejects(
+      installVendorEntry({
+        configPath: path.join(dir, "fx.yml"),
+        configDir: dir,
+        name: "local",
+        source: "./local.js",
+      }),
+      /symbolic link/,
+    );
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("does not overwrite an untracked vendor file", async () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  const vendorFile = path.join(dir, "extensions", "local.js");
+  write(vendorFile, "// keep me\n");
+  try {
+    const result = await installVendorEntry({
+      configPath: path.join(dir, "fx.yml"),
+      configDir: dir,
+      name: "local",
+      source: "./local.js",
+    });
+    assert.equal(result.file, "extensions/local-2.js");
+    assert.equal(fs.readFileSync(vendorFile, "utf8"), "// keep me\n");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reinstall preserves an existing unsandboxed flag", () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  try {
+    const first = run(
+      ["vendor", "install", "--unsandboxed", "./local.js", "--as", "local"],
+      dir,
+    );
+    assert.equal(first.status, 0, first.stderr);
+    const second = run(
+      ["vendor", "install", "./local.js", "--as", "local"],
+      dir,
+    );
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(
+      fs.readFileSync(path.join(dir, "fx.yml"), "utf8"),
+      /unsandboxed: true/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("combined loaders do not flag the other loader's unsandboxed ids", () => {
+  const dir = project({
+    config: `project:
+  name: "Vendor"
+  extensions:
+    - ./local.js
+  unsandboxed:
+    - demo
+vendor:
+  demo: ./unsandboxed.js
+`,
+    extensions: { "local.js": SIGNALS, "unsandboxed.js": UNSANDBOXED },
+  });
+  try {
+    const result = run(["catalog", "--no-upgrade-prompt"], dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /does not match any loaded extension/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -41,10 +41,12 @@ export const DEFAULT_VENDOR_DIR = "extensions";
 const REMOTE_SOURCE = /^https?:\/\//i;
 const DATA_SOURCE = /^data:/i;
 
+/** True for http(s) extension sources. */
 function isRemoteSource(source) {
   return REMOTE_SOURCE.test(String(source));
 }
 
+/** True for embedded data-URI extension sources. */
 function isDataSource(source) {
   return DATA_SOURCE.test(String(source));
 }
