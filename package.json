@@ -40,12 +40,14 @@
     "prepack": "node scripts/build-packager.js --if-missing"
   },
   "dependencies": {
-    "js-yaml": "^5.4.3",
-    "quickjs-emscripten": "^0.32.0",
+    "@clack/prompts": "^1.8.1",
     "@fiahfy/icns": "0.0.7",
     "@turbowarp/sbdl": "^7.0.0",
+    "commander": "^15.0.0",
     "cross-fetch": "^4.1.0",
+    "js-yaml": "^5.4.3",
     "jszip": "^3.10.1",
+    "quickjs-emscripten": "^0.32.0",
     "sha.js": "^2.4.12"
   },
   "devDependencies": {

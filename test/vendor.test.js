@@ -842,7 +842,7 @@ test("vendor CLI installs, lists, verifies and removes a local extension", () =>
 
     const listed = run(["vendor", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    const json = JSON.parse(listed.stdout);
+    const json = JSON.parse(listed.stdout).data;
     assert.equal(json.vendorDir, "extensions");
     assert.equal(json.extensions.length, 1);
     assert.equal(json.extensions[0].name, "local");
@@ -855,7 +855,7 @@ test("vendor CLI installs, lists, verifies and removes a local extension", () =>
     const built = run(["b", "-o", "out.pmp", "--no-upgrade-prompt"], dir);
     assert.equal(built.status, 0, built.stderr);
 
-    const removed = run(["vendor", "remove", "local"], dir);
+    const removed = run(["vendor", "remove", "local", "--yes"], dir);
     assert.equal(removed.status, 0, removed.stderr);
     assert.equal(
       fs.existsSync(path.join(dir, "extensions", "local.js")),
@@ -893,7 +893,7 @@ vendorDir: deps/extensions
 
     const listed = run(["vendor", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    const json = JSON.parse(listed.stdout);
+    const json = JSON.parse(listed.stdout).data;
     assert.equal(json.vendorDir, "deps/extensions");
     assert.equal(json.extensions[0].file, "deps/extensions/local.js");
     assert.equal(json.extensions[0].unsandboxed, true);

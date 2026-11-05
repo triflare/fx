@@ -62,9 +62,10 @@ const HEX_COLOR = /^#(?:[\da-f]{3}|[\da-f]{6})$/i;
 // styleText only learned hex colors in Node 24.16, and engines allow any 22, so
 // the truecolor escape is built here. The gate is styleText's own: ask it to
 // color a marker, and stay plain when it comes back untouched.
-function colorize(text, color, stream) {
+function colorize(text, color, stream, force = false) {
   if (!HEX_COLOR.test(color)) return styleText(color, text, { stream });
-  if (!styleText("red", "\u0000", { stream }).includes("\u001b")) return text;
+  if (!force && !styleText("red", "\u0000", { stream }).includes("\u001b"))
+    return text;
   const digits =
     color.length === 4 ? color.slice(1).replace(/./g, "$&$&") : color.slice(1);
   const [red, green, blue] = digits
@@ -76,7 +77,11 @@ function colorize(text, color, stream) {
 // Paints a product name or command in three equal bands taken straight from the
 // logo palette. The colors disappear when the stream can't render them, so
 // piped output and CI logs stay plain text.
-export function brandText(text, stream = process.stdout) {
+export function brandText(
+  text,
+  stream = process.stdout,
+  { force = false } = {},
+) {
   const { primary, secondary, tertiary } = brandingColors();
   const palette = [primary, secondary, tertiary];
   const chars = Array.from(text);
@@ -96,6 +101,7 @@ export function brandText(text, stream = process.stdout) {
           chars.slice(start, index).join(""),
           palette[bandFor(start)],
           stream,
+          force,
         ),
       );
       start = index;
