@@ -31,7 +31,109 @@ export const DEFAULT_PROJECT = {
  */
 export const DEFAULT_FX = {
   partialSprites: false,
+  vendorDir: "extensions",
 };
+
+/** Default directory that receives vendored extension sources. */
+export const DEFAULT_VENDOR_DIR = "extensions";
+
+/** Source schemes that identify a remote extension. */
+const REMOTE_SOURCE = /^https?:\/\//i;
+const DATA_SOURCE = /^data:/i;
+
+function isRemoteSource(source) {
+  return REMOTE_SOURCE.test(String(source));
+}
+
+function isDataSource(source) {
+  return DATA_SOURCE.test(String(source));
+}
+
+/** Localhost/loopback URLs can point at a development server that changes. */
+export function isLocalhostSource(source) {
+  if (!isRemoteSource(source)) return false;
+  try {
+    const url = new URL(String(source));
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "0.0.0.0" ||
+      host === "::1" ||
+      /^127\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalize one `vendor:` entry. A string is shorthand for `{ url }`; a
+ * mapping may add `unsandboxed`, `volatile` and any future fields.
+ *
+ * @param {string} name
+ * @param {unknown} raw
+ * @returns {object}
+ */
+export function normalizeVendorEntry(name, raw) {
+  const key = String(name);
+  let source;
+  let options = {};
+  if (typeof raw === "string" || typeof raw === "number") {
+    source = String(raw);
+  } else if (isPlainObject(raw)) {
+    source = raw.url ?? raw.source ?? raw.path ?? raw.file;
+    options = { ...raw };
+  } else {
+    throw new Error(
+      `${configFilename()}: vendor.${key} must be a URL, path, or mapping`,
+    );
+  }
+  if (typeof source !== "string" || source.trim() === "")
+    throw new Error(
+      `${configFilename()}: vendor.${key} needs a "url" (or "source"/"path")`,
+    );
+  source = source.trim();
+
+  const remote = isRemoteSource(source);
+  const local = !remote && !isDataSource(source);
+  const unsandboxed =
+    options.unsandboxed === true ||
+    (typeof options.unsandboxed === "string" &&
+      options.unsandboxed.trim() !== "");
+  const volatile =
+    options.volatile == null
+      ? remote && isLocalhostSource(source)
+      : Boolean(options.volatile);
+
+  return {
+    ...options,
+    name: key,
+    source,
+    url: source,
+    remote,
+    local,
+    data: isDataSource(source),
+    volatile,
+    unsandboxed,
+  };
+}
+
+/**
+ * Normalize the top-level `vendor:` mapping. Order is load order, so this is an
+ * array rather than a plain object.
+ *
+ * @param {unknown} raw
+ * @returns {object[]}
+ */
+export function normalizeVendor(raw = {}) {
+  if (raw == null) return [];
+  if (!isPlainObject(raw))
+    throw new Error(`${configFilename()}: "vendor" must be a mapping`);
+  return Object.entries(raw).map(([name, entry]) =>
+    normalizeVendorEntry(name, entry),
+  );
+}
 
 /**
  * Packaging defaults. These never reach PenguinMod itself; they are handed to
@@ -281,6 +383,11 @@ export function normalizeFx(raw = {}) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     if (raw.partialSprites != null)
       fx.partialSprites = Boolean(raw.partialSprites);
+    if (raw.vendorDir != null) {
+      if (typeof raw.vendorDir !== "string" || raw.vendorDir.trim() === "")
+        throw new Error(`${configFilename()}: fx.vendorDir must be a path`);
+      fx.vendorDir = raw.vendorDir.trim();
+    }
   }
   return fx;
 }
@@ -288,7 +395,7 @@ export function normalizeFx(raw = {}) {
 /**
  * Parse a YAML config string.
  * @param {string} text
- * @returns {{project: typeof DEFAULT_PROJECT, fx: typeof DEFAULT_FX, raw: object}}
+ * @returns {{project: typeof DEFAULT_PROJECT, fx: typeof DEFAULT_FX, package: typeof DEFAULT_PACKAGE, vendor: object[], vendorDir: string, raw: object}}
  */
 export function parseConfig(text) {
   const raw = yaml.load(text) || {};
@@ -298,10 +405,20 @@ export function parseConfig(text) {
     );
   if (raw.fx != null && (typeof raw.fx !== "object" || Array.isArray(raw.fx)))
     throw new Error(`${configFilename()} must contain an "fx" mapping`);
+  const fx = normalizeFx(raw.fx || {});
+  // `vendorDir` is documented at the top level, but accepting it under `fx:`
+  // keeps older drafts and long configs working.
+  if (raw.vendorDir != null) {
+    if (typeof raw.vendorDir !== "string" || raw.vendorDir.trim() === "")
+      throw new Error(`${configFilename()}: vendorDir must be a path`);
+    fx.vendorDir = raw.vendorDir.trim();
+  }
   return {
     project: normalizeProject(raw.project || {}),
-    fx: normalizeFx(raw.fx || {}),
+    fx,
     package: normalizePackage(raw.package || {}),
+    vendor: normalizeVendor(raw.vendor || {}),
+    vendorDir: fx.vendorDir,
     raw,
   };
 }
@@ -339,14 +456,26 @@ export function loadConfigFrom(dir) {
       project,
       fx,
       package: pkg,
+      vendor,
+      vendorDir,
       raw,
     } = parseConfig(fs.readFileSync(found, "utf8"));
-    return { project, fx, package: pkg, raw, path: found };
+    return {
+      project,
+      fx,
+      package: pkg,
+      vendor,
+      vendorDir,
+      raw,
+      path: found,
+    };
   }
   return {
     project: { ...DEFAULT_PROJECT },
     fx: { ...DEFAULT_FX },
     package: normalizePackage({}),
+    vendor: [],
+    vendorDir: DEFAULT_VENDOR_DIR,
     raw: {},
     path: null,
   };
@@ -394,7 +523,10 @@ export function configComment(project) {
 
 export {
   addProjectExtension,
+  addVendorEntry,
   extensionKey,
   readProjectExtensions,
   removeProjectExtension,
+  removeProjectExtensions,
+  removeVendorEntry,
 } from "./config-edit.js";

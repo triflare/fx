@@ -783,7 +783,7 @@ export function readExtensionDataUri(uri) {
 }
 
 /** Resolve a config entry to source text. */
-async function resolveSource(entry, baseDir, fetchImpl) {
+export async function resolveSource(entry, baseDir, fetchImpl) {
   const value = String(entry);
   if (/^data:/i.test(value)) {
     const source = readExtensionDataUri(value);
@@ -848,6 +848,17 @@ async function evaluateExtensionAny(source, filename) {
       throw unsandboxedError;
     }
   }
+}
+
+/**
+ * Inspect extension source without running it in the Node.js process.
+ * Useful to propose an extension id while vendoring or migrating.
+ * @param {string} source
+ * @param {string} [filename]
+ * @returns {Promise<{infos: object[], unsandboxed: boolean}>}
+ */
+export async function inspectExtension(source, filename = "extension") {
+  return evaluateExtensionAny(source, filename);
 }
 
 /**

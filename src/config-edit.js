@@ -54,7 +54,8 @@ function childKey(lines, start, end, key) {
 }
 
 function childIndent(lines, start, end) {
-  for (let index = start + 1; index < end; index++) {
+  const limit = Math.min(end, lines.length);
+  for (let index = start + 1; index < limit; index++) {
     const match = /^([ \t]+)\S/.exec(content(lines[index]));
     if (match) return match[1];
   }
@@ -335,4 +336,251 @@ export function removeProjectExtension(configPath, target) {
     extensions: removed,
     unsandboxedRemoved: unsandboxedRemoved.length > 0,
   };
+}
+
+/**
+ * Remove `project.extensions` entirely (used by migration).
+ *
+ * Unlike {@link removeProjectExtension}, this drops the key itself instead of
+ * leaving an empty list, so a fully migrated file has no legacy section left.
+ */
+export function removeProjectExtensions(configPath) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const bounds = projectBounds(lines);
+  if (!bounds) return [];
+  const list = readList(lines, "extensions", bounds.index, bounds.end);
+  if (!list) return [];
+
+  const removed = [...list.values];
+  if (list.style === "block") {
+    const end = Math.max(list.keyLine.index, list.lastLine) + 1;
+    lines.splice(list.keyLine.index, end - list.keyLine.index);
+  } else {
+    lines.splice(list.keyLine.index, 1);
+  }
+  writeDocument(configPath, lines.join(""));
+  return removed;
+}
+
+// --------------------------------------------------------------- vendor edits
+
+const SAFE_KEY = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+
+function quoteKey(key) {
+  // YAML 1.1 treats bare yes/no/on/off/null as non-strings.
+  return SAFE_KEY.test(key) &&
+    !/^(?:y|yes|n|no|on|off|null|true|false)$/i.test(key)
+    ? key
+    : JSON.stringify(String(key));
+}
+
+function vendorEntryLines(name, source, options, indent, eol) {
+  const extra = [];
+  if (options.unsandboxed) extra.push(`${indent}  unsandboxed: true${eol}`);
+  if (options.volatile) extra.push(`${indent}  volatile: true${eol}`);
+  if (extra.length === 0)
+    return [`${indent}${quoteKey(name)}: ${quote(source)}${eol}`];
+  return [
+    `${indent}${quoteKey(name)}:${eol}`,
+    `${indent}  url: ${quote(source)}${eol}`,
+    ...extra,
+  ];
+}
+
+function topLevelBounds(lines, key) {
+  const found = topLevel(lines, key);
+  if (!found) return null;
+  const { value: rest, comment } = splitComment(found.rest);
+  if (rest !== "") {
+    // A flow mapping can be expanded losslessly (comments on the line aside).
+    if (rest.startsWith("{") && rest.endsWith("}")) {
+      const mapping = parseValue(rest);
+      if (mapping && typeof mapping === "object" && !Array.isArray(mapping))
+        return {
+          index: found.index,
+          end: found.index + 1,
+          inline: rest,
+          comment,
+        };
+    }
+    throw new Error(`${key} must be a block mapping to edit it`);
+  }
+  return {
+    index: found.index,
+    end: sectionEnd(lines, found.index),
+    inline: null,
+    comment,
+  };
+}
+
+function mappingEntrySpans(lines, start, end) {
+  const indent = childIndent(lines, start, end);
+  const spans = [];
+  const limit = Math.min(end, lines.length);
+  for (let index = start + 1; index < limit; index++) {
+    const text = content(lines[index]);
+    if (text.trim() === "" || /^[ \t]*#/.test(text)) continue;
+    const outer = /^([ \t]+)(.*)$/.exec(text);
+    if (!outer || outer[1] !== indent) continue;
+    const match = /^(.+?)[ \t]*:[ \t]*(.*)$/.exec(outer[2]);
+    if (!match) continue;
+    let key;
+    try {
+      const parsed = yaml.load(`${match[1]}: null`);
+      key =
+        parsed && typeof parsed === "object" ? Object.keys(parsed)[0] : null;
+    } catch {
+      continue;
+    }
+    if (key == null) continue;
+    spans.push({ index, indent, key: String(key), rest: match[2] });
+  }
+  for (let index = 0; index < spans.length; index++)
+    spans[index].end = index + 1 < spans.length ? spans[index + 1].index : end;
+  return spans;
+}
+
+function replaceRange(lines, start, end, added) {
+  lines.splice(start, end - start, ...added);
+}
+
+/**
+ * Add or replace a `vendor:` entry without reformatting the rest of fx.yml.
+ *
+ * @param {string} configPath
+ * @param {string} name
+ * @param {string} source
+ * @param {{unsandboxed?: boolean, volatile?: boolean}} [options]
+ * @returns {{added: boolean, updated: boolean}}
+ */
+export function addVendorEntry(configPath, name, source, options = {}) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const key = String(name);
+  let added = false;
+  let updated = false;
+
+  const bounds = topLevelBounds(lines, "vendor");
+  if (!bounds) {
+    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n"))
+      lines[lines.length - 1] += eol;
+    lines.push(
+      `vendor:${eol}`,
+      ...vendorEntryLines(key, source, options, "  ", eol),
+    );
+    added = true;
+  } else if (bounds.inline) {
+    const mapping = parseValue(bounds.inline) || {};
+    updated = Object.hasOwn(mapping, key);
+    added = !updated;
+    mapping[key] =
+      options.unsandboxed || options.volatile
+        ? {
+            url: source,
+            ...(options.unsandboxed ? { unsandboxed: true } : {}),
+            ...(options.volatile ? { volatile: true } : {}),
+          }
+        : source;
+    const dumped = yaml
+      .dump({ vendor: mapping }, { lineWidth: -1, noRefs: true })
+      .split("\n")
+      .filter((line, index, all) => !(index === all.length - 1 && line === ""))
+      .map((line) => `${line}${eol}`);
+    if (bounds.comment) dumped[0] = `vendor: ${bounds.comment}${eol}`;
+    replaceRange(lines, bounds.index, bounds.index + 1, dumped);
+  } else {
+    const spans = mappingEntrySpans(lines, bounds.index, bounds.end);
+    const existing = spans.find((span) => span.key === key);
+    if (existing) {
+      replaceRange(
+        lines,
+        existing.index,
+        existing.end,
+        vendorEntryLines(key, source, options, existing.indent, eol),
+      );
+      updated = true;
+    } else {
+      const indent = childIndent(lines, bounds.index, bounds.end);
+      insertAt(
+        lines,
+        bounds.end,
+        vendorEntryLines(key, source, options, indent, eol),
+        eol,
+      );
+      added = true;
+    }
+  }
+
+  if (added || updated) writeDocument(configPath, lines.join(""));
+  return { added, updated };
+}
+
+/**
+ * Remove a `vendor:` entry.
+ * @param {string} configPath
+ * @param {string} name
+ * @returns {{removed: string|null}}
+ */
+export function removeVendorEntry(configPath, name) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const key = String(name);
+  const bounds = topLevelBounds(lines, "vendor");
+  if (!bounds) return { removed: null };
+
+  if (bounds.inline) {
+    const mapping = parseValue(bounds.inline);
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
+      return { removed: null };
+    if (!Object.hasOwn(mapping, key)) return { removed: null };
+    const source =
+      typeof mapping[key] === "string"
+        ? mapping[key]
+        : (mapping[key]?.url ?? mapping[key]?.source ?? null);
+    delete mapping[key];
+    const rest = Object.keys(mapping).length
+      ? ` ${JSON.stringify(mapping)}`
+      : " {}";
+    const comment = bounds.comment ? ` ${bounds.comment}` : "";
+    const line = lines[bounds.index];
+    lines[bounds.index] = `vendor:${rest}${comment}${
+      /\r?\n$/.test(line) ? ending(line) : eol
+    }`;
+    writeDocument(configPath, lines.join(""));
+    return { removed: source };
+  }
+
+  const spans = mappingEntrySpans(lines, bounds.index, bounds.end);
+  const existing = spans.find((span) => span.key === key);
+  if (!existing) return { removed: null };
+
+  let source = null;
+  try {
+    const parsed = yaml.load(
+      [
+        content(lines[bounds.index]),
+        ...lines.slice(existing.index, existing.end),
+      ]
+        .join("\n")
+        .replace(/^vendor:/, "vendor:"),
+    );
+    const entry = parsed?.vendor?.[key];
+    source =
+      typeof entry === "string"
+        ? entry
+        : (entry?.url ?? entry?.source ?? entry?.path ?? null);
+  } catch {
+    // The entry is removed either way.
+  }
+
+  replaceRange(lines, existing.index, existing.end, []);
+  const remaining = mappingEntrySpans(lines, bounds.index, bounds.end);
+  if (remaining.length === 0) {
+    replaceRange(lines, bounds.index, bounds.end, [`vendor: {}${eol}`]);
+  }
+  writeDocument(configPath, lines.join(""));
+  return { removed: source ?? key };
 }
