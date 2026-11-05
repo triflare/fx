@@ -201,6 +201,28 @@ test("expands inline vendor mappings and keeps every entry", () => {
   }
 });
 
+test("vendor edits persist an explicit volatile: false option", () => {
+  const dir = tmp();
+  const configPath = path.join(dir, "fx.yml");
+  write(
+    configPath,
+    `project:\n  name: "Demo"\nvendor: { flaky: "http://localhost:8080/flaky.js" } # keep\n`,
+  );
+  try {
+    addVendorEntry(configPath, "flaky", "http://localhost:8080/flaky.js", {
+      volatile: false,
+    });
+    addVendorEntry(configPath, "plain", "./plain.js");
+    const text = fs.readFileSync(configPath, "utf8");
+    assert.match(text, /volatile: false/);
+    assert.match(text, /plain: "\.\/plain\.js"/);
+    assert.match(text, /# keep/);
+    assert.equal(parseConfig(text).vendor[0].volatile, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("removing project.extensions drops the key entirely", () => {
   const dir = tmp();
   const configPath = path.join(dir, "fx.yml");
@@ -225,6 +247,31 @@ test("removing project.extensions drops the key entirely", () => {
     - demo
 `,
   );
+});
+
+test("migration removes extensions from an inline project mapping", async () => {
+  const dir = project({
+    config: `project: { name: "Inline", extensions: ["./local.js"], unsandboxed: [signals] } # keep\n`,
+    extensions: { "local.js": SIGNALS },
+  });
+  const configPath = path.join(dir, "fx.yml");
+  try {
+    const result = await migrateProjectExtensions({
+      configPath,
+      configDir: dir,
+      config: loadConfigFrom(dir),
+    });
+    assert.equal(result.migrated.length, 1);
+    const text = fs.readFileSync(configPath, "utf8");
+    const raw = parseConfig(text).raw.project;
+    assert.equal(raw.name, "Inline");
+    assert.equal(Object.hasOwn(raw, "extensions"), false);
+    assert.deepEqual(raw.unsandboxed, ["signals"]);
+    assert.match(text, /# keep/);
+    assert.deepEqual(loadConfigFrom(dir).project.extensions, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("installs a local extension, locks it and embeds it in builds", async () => {
@@ -574,6 +621,64 @@ test("outdated sends conditional headers and honours 304 responses", async () =>
       seen.headers["If-Modified-Since"],
       "Wed, 01 Jan 2025 00:00:00 GMT",
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("outdated ignores validators from a changed source", async () => {
+  const dir = project({
+    config: `project:\n  name: "Vendor"\nvendor:\n  signals: https://example.test/signals.js\n`,
+  });
+  const configPath = path.join(dir, "fx.yml");
+  const installFetch = async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: (name) => (name.toLowerCase() === "etag" ? '"v1"' : null) },
+    arrayBuffer: async () => Buffer.from(SIGNALS),
+  });
+  try {
+    await installVendorEntry({
+      configPath,
+      configDir: dir,
+      name: "signals",
+      source: "https://example.test/signals.js",
+      fetchImpl: installFetch,
+    });
+    write(
+      configPath,
+      `project:\n  name: "Vendor"\nvendor:\n  signals: https://mirror.test/signals.js\n`,
+    );
+
+    let seen;
+    const changedFetch = async (url, options) => {
+      seen = options;
+      if (options) {
+        return {
+          ok: false,
+          status: 304,
+          statusText: "Not Modified",
+          headers: { get: () => null },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: { get: () => null },
+        arrayBuffer: async () => Buffer.from(`${SIGNALS}\n// changed\n`),
+      };
+    };
+    const results = await outdatedVendor({
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      fetchImpl: changedFetch,
+    });
+    assert.deepEqual(results, [
+      { name: "signals", status: "outdated", file: "extensions/signals.js" },
+    ]);
+    assert.equal(seen, undefined);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1327,6 +1432,25 @@ test("reinstall preserves an existing unsandboxed flag", () => {
       fs.readFileSync(path.join(dir, "fx.yml"), "utf8"),
       /unsandboxed: true/,
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reinstall preserves an explicit volatile: false flag", () => {
+  const dir = project({
+    config: `project:\n  name: "Vendor"\nvendor:\n  local:\n    url: ./local.js\n    volatile: false\n`,
+    extensions: { "local.js": SIGNALS },
+  });
+  try {
+    const result = run(
+      ["vendor", "install", "./local.js", "--as", "local"],
+      dir,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const text = fs.readFileSync(path.join(dir, "fx.yml"), "utf8");
+    assert.match(text, /volatile: false/);
+    assert.equal(loadConfigFrom(dir).vendor[0].volatile, false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

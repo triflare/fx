@@ -1244,6 +1244,15 @@ async function cmdVendorInstall(args) {
         `Use "${product.command} vendor update ${name}" or pass --force to replace it.`,
     );
 
+  const rawEntry = loaded.raw?.vendor?.[name];
+  const existingVolatile =
+    rawEntry &&
+    typeof rawEntry === "object" &&
+    Object.hasOwn(rawEntry, "volatile")
+      ? Boolean(rawEntry.volatile)
+      : existing?.volatile
+        ? true
+        : undefined;
   const result = await installVendorEntry({
     configPath,
     configDir,
@@ -1252,7 +1261,7 @@ async function cmdVendorInstall(args) {
     vendorDir: path.resolve(configDir, loaded.vendorDir || "extensions"),
     unsandboxed:
       Boolean(args.flags.unsandboxed) || Boolean(existing?.unsandboxed),
-    volatile: existing?.volatile,
+    volatile: existingVolatile,
   });
   log.success(
     `Vendored ${name} -> ${result.file} (${result.lockEntry.sha256.slice(0, 12)}…)`,
