@@ -29,6 +29,27 @@ export {
   resolvePackageConfig,
   slugify,
 } from "./package.js";
+export {
+  LOCK_FILENAME,
+  VendorError,
+  defaultVendorName,
+  fetchVendorSource,
+  formatDiff,
+  installVendor,
+  installVendorEntry,
+  loadVendorExtensions,
+  migrateProjectExtensions,
+  outdatedVendor,
+  readLock,
+  removeVendoredExtension,
+  resolveVendorFiles,
+  sha256,
+  uniqueVendorName,
+  updateVendor,
+  vendorDirPath,
+  verifyVendor,
+  writeLock,
+} from "./vendor.js";
 export { formatDevUrls, injectDevClient, startDevServer } from "./dev.js";
 export * from "./catalog.js";
 export * from "./config.js";
