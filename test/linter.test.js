@@ -827,3 +827,28 @@ test("preset and rule tables stay consistent", () => {
   assert.ok(PRESETS.strict.length > PRESETS.recommended.length);
   assert.ok(PRESETS.recommended.length > PRESETS.minimal.length);
 });
+
+test("FX301 follows the compiler's conversion of while conditions", () => {
+  for (const [condition, infinite] of [
+    ["1", false],
+    ["0", false],
+    ['"hello"', false],
+    ['"1"', false],
+    ['" true "', false],
+    ["false", false],
+    ["true", true],
+    ['"TRUE"', true],
+    ["1 < 2", true],
+    ["1 + 0", true],
+    ["not 1", true],
+    ["1 and true", false],
+    ["1 or false", false],
+  ]) {
+    const diagnostics = lint(`sprite "Cat" {
+      when greenFlag {
+        while (${condition}) { motion.moveSteps(1); }
+      }
+    }`);
+    assert.equal(ruleIds(diagnostics).includes("FX301"), infinite, condition);
+  }
+});

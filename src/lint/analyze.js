@@ -128,6 +128,30 @@ function staticValue(expr) {
   }
 }
 
+/** Static conversion matching the compiler's booleanInput and boolean operators. */
+function staticBoolean(expr) {
+  if (expr.type === "Unary" && expr.op === "not") {
+    const value = staticBoolean(expr.operand);
+    return value === null ? null : !value;
+  }
+  if (expr.type === "Binary" && ["and", "or"].includes(expr.op)) {
+    const left = staticBoolean(expr.left);
+    const right = staticBoolean(expr.right);
+    if (expr.op === "and") {
+      if (left === false || right === false) return false;
+      return left === null || right === null ? null : left && right;
+    }
+    if (left === true || right === true) return true;
+    return left === null || right === null ? null : left || right;
+  }
+  const value = staticValue(expr);
+  if (value === null) return null;
+  // Primitive inputs are compared with "true"; reporter blocks pass through.
+  if (["Number", "String", "Boolean"].includes(expr.type))
+    return String(value).toLowerCase() === "true";
+  return truthy(value);
+}
+
 /** Whether a statement ends the script it belongs to. */
 function isTerminalCall(node) {
   if (node.type === "Return") return true;
@@ -566,8 +590,7 @@ class Analyzer {
           );
         }
         if (
-          value !== null &&
-          truthy(value) &&
+          staticBoolean(statement.cond) === true &&
           !this.bodyYields(statement.body, state)
         ) {
           this.report(
