@@ -16,6 +16,7 @@ Code PenguinMod projects with text.
 - [Highlights](#highlights)
 - [Overview](#overview)
 - [Usage](#usage)
+- [Formatting](#formatting)
 - [Vendoring Extensions](#vendoring-extensions)
 - [Installation](#installation)
 - [Feedback and Contributing](#feedback-and-contributing)
@@ -54,7 +55,33 @@ $ fx build
   extensions: (none)
 ```
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:1f825081f9f722158035083df5b16f42120cc5fbd7d56eb25c770f3c64e339b2 -->
+
+## Formatting
+
+Run `fx fmt` to format every `.tfx` source in the current directory, or pass a file or directory:
+
+```bash
+fx fmt
+fx fmt src/main.tfx
+fx fmt src/ --check
+cat src/main.tfx | fx fmt --stdin
+fx fmt src/main.tfx --stdout
+fx fmt --check --json
+```
+
+- `--check` leaves files untouched and exits with status 1 if formatting is needed (0 if already formatted).
+- `--stdin` reads source from standard input and writes formatted source to standard output; it takes no file argument. With `--check`, it checks the input instead.
+- `--stdout` writes formatted source for a single file to standard output without changing the file. It cannot be combined with `--check`.
+- `--json` returns a structured result, including formatted code for `--stdin` and `--stdout` output.
+
+Formatting is idempotent: running it twice produces no further changes. It preserves comments, declaration order, and project data, normalizes whitespace and line endings, and does not compile the project. Files with parse errors are left untouched.
+
 ## Vendoring Extensions
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 Extension URLs are mutable and can disappear, so Fx can commit a verified copy of every extension instead. Declare them under `vendor:` in `fx.yml`; order is load order:
 
