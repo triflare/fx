@@ -94,7 +94,9 @@ test("extension add, list and remove edit fx.yml", () => {
 
     const listed = run(["extension", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    assert.deepEqual(JSON.parse(listed.stdout), {
+    const document = JSON.parse(listed.stdout);
+    assert.equal(document.ok, true);
+    assert.deepEqual(document.data, {
       extensions: ["https://example.test/signals.js"],
       unsandboxed: ["signals"],
     });
@@ -126,7 +128,7 @@ test("sprite add imports a sprite3 as source and assets", () => {
 
     const listed = run(["sprite", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    assert.deepEqual(JSON.parse(listed.stdout), [
+    assert.deepEqual(JSON.parse(listed.stdout).data, [
       {
         name: "Robot",
         file: path.join("src", "robot.tfx"),
@@ -178,10 +180,10 @@ test("sprite remove deletes an imported sprite file", () => {
     writeSprite3(dir);
     assert.equal(run(["sprite", "add", "robot.sprite3"], dir).status, 0);
 
-    const removed = run(["sprite", "remove", "Robot"], dir);
+    const removed = run(["sprite", "remove", "Robot", "--yes"], dir);
     assert.equal(removed.status, 0, removed.stderr);
     assert.ok(!fs.existsSync(path.join(dir, "src", "robot.tfx")));
-    assert.equal(run(["sprite", "remove", "Robot"], dir).status, 1);
+    assert.equal(run(["sprite", "remove", "Robot", "--yes"], dir).status, 1);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -213,7 +215,7 @@ test("partial sprite fragments build, check, list and remove together", () => {
 
     const listed = run(["sprite", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    assert.deepEqual(JSON.parse(listed.stdout), [
+    assert.deepEqual(JSON.parse(listed.stdout).data, [
       {
         name: "Cat",
         file: path.join("src", "base.tfx"),
@@ -222,10 +224,49 @@ test("partial sprite fragments build, check, list and remove together", () => {
       },
     ]);
 
-    const removed = run(["sprite", "remove", "Cat"], dir);
+    const removed = run(["sprite", "remove", "Cat", "--yes"], dir);
     assert.equal(removed.status, 0, removed.stderr);
     assert.ok(!fs.existsSync(path.join(dir, "src", "base.tfx")));
     assert.ok(!fs.existsSync(path.join(dir, "src", "fragment.tfx")));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("help command shows root and command help", () => {
+  const dir = tmp();
+  try {
+    const root = run(["help"], dir);
+    assert.equal(root.status, 0, root.stderr);
+    assert.match(root.stdout, /Usage: fx \[options\] \[command\]/);
+
+    const build = run(["help", "build"], dir);
+    assert.equal(build.status, 0, build.stderr);
+    assert.match(build.stdout, /Usage: fx build/);
+
+    const vendor = run(["help", "vendor"], dir);
+    assert.equal(vendor.status, 0, vendor.stderr);
+    assert.match(vendor.stdout, /Usage: fx vendor \[options\] \[command\]/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("shell completion lists commands and options", () => {
+  const dir = tmp();
+  try {
+    const commands = run(["__complete", "bash", "--", ""], dir);
+    assert.equal(commands.status, 0, commands.stderr);
+    assert.match(commands.stdout, /vendor/);
+    assert.match(commands.stdout, /sprite/);
+
+    const options = run(["__complete", "bash", "--", "vendor", "--"], dir);
+    assert.equal(options.status, 0, options.stderr);
+    assert.match(options.stdout, /--json/);
+
+    const filtered = run(["__complete", "bash", "--", "--j"], dir);
+    assert.equal(filtered.status, 0, filtered.stderr);
+    assert.equal(filtered.stdout.trim(), "--json");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

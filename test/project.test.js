@@ -400,13 +400,19 @@ test("boolean CLI flags leave the following input positional", () => {
   const dir = tmp();
   const source = path.join(dir, "game.source");
   write(source, 'sprite "S" { when greenFlag { looks.show(); } }');
-  for (const flag of ["--no-config", "--json", "--help", "-h", "--h"]) {
+  for (const flag of ["--no-config", "--json"]) {
     const checked = spawnSync(process.execPath, [bin, "c", flag, source], {
       cwd: dir,
       encoding: "utf8",
     });
     assert.equal(checked.status, 0, checked.stderr);
-    assert.match(checked.stdout, /Checked 1 file/);
+    if (flag === "--json") {
+      const document = JSON.parse(checked.stdout);
+      assert.equal(document.ok, true);
+      assert.equal(document.data.files.length, 1);
+    } else {
+      assert.match(checked.stdout, /Checked 1 file/);
+    }
   }
   const output = path.join(dir, "explicit.pmp");
   const built = spawnSync(
@@ -520,7 +526,7 @@ test("catalog lists blocks from extensions loaded over a URL", async () => {
         cwd: root,
       },
     );
-    const catalog = JSON.parse(json.stdout);
+    const catalog = JSON.parse(json.stdout).data;
     assert.equal(catalog["signals.send"].opcode, "signals_send");
     assert.equal(catalog["motion.moveSteps"].opcode, "motion_movesteps");
 
@@ -530,7 +536,7 @@ test("catalog lists blocks from extensions loaded over a URL", async () => {
       [bin, "b", "-o", path.join(dir, "out.pmp")],
       { cwd: dir },
     );
-    assert.match(built.stdout, /extensions: signals/);
+    assert.match(built.stdout, /Extensions\s+signals/);
   } finally {
     server.close();
   }

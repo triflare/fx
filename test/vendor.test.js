@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
+import { loadProjectState } from "../src/cli/context.js";
 import { loadConfigFrom, parseConfig } from "../src/config.js";
 import {
   addVendorEntry,
@@ -954,7 +955,7 @@ test("vendor CLI installs, lists, verifies and removes a local extension", () =>
 
     const listed = run(["vendor", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    const json = JSON.parse(listed.stdout);
+    const json = JSON.parse(listed.stdout).data;
     assert.equal(json.vendorDir, "extensions");
     assert.equal(json.extensions.length, 1);
     assert.equal(json.extensions[0].name, "local");
@@ -967,7 +968,7 @@ test("vendor CLI installs, lists, verifies and removes a local extension", () =>
     const built = run(["b", "-o", "out.pmp", "--no-upgrade-prompt"], dir);
     assert.equal(built.status, 0, built.stderr);
 
-    const removed = run(["vendor", "remove", "local"], dir);
+    const removed = run(["vendor", "remove", "local", "--yes"], dir);
     assert.equal(removed.status, 0, removed.stderr);
     assert.equal(
       fs.existsSync(path.join(dir, "extensions", "local.js")),
@@ -1005,7 +1006,7 @@ vendorDir: deps/extensions
 
     const listed = run(["vendor", "list", "--json"], dir);
     assert.equal(listed.status, 0, listed.stderr);
-    const json = JSON.parse(listed.stdout);
+    const json = JSON.parse(listed.stdout).data;
     assert.equal(json.vendorDir, "deps/extensions");
     assert.equal(json.extensions[0].file, "deps/extensions/local.js");
     assert.equal(json.extensions[0].unsandboxed, true);
@@ -1329,6 +1330,65 @@ test("refuses to write or read through a symlinked vendor directory", async () =
   }
 });
 
+test("rejects vendor directories outside or equal to the config directory", async () => {
+  const parent = tmp();
+  const outside = path.join(parent, "outside");
+  const equal = path.join(parent, "equal");
+  try {
+    write(
+      path.join(parent, "project", "fx.yml"),
+      `project:\n  name: "Vendor"\nvendorDir: ../outside\nvendor:\n  local: ./local.js\n`,
+    );
+    write(path.join(parent, "project", "local.js"), SIGNALS);
+    await assert.rejects(
+      installVendor({
+        configDir: path.join(parent, "project"),
+        config: loadConfigFrom(path.join(parent, "project")),
+      }),
+      /must be inside the config directory/,
+    );
+
+    write(
+      path.join(equal, "fx.yml"),
+      `project:\n  name: "Vendor"\nvendorDir: .\nvendor:\n  local: ./local.js\n`,
+    );
+    write(path.join(equal, "local.js"), SIGNALS);
+    await assert.rejects(
+      installVendor({ configDir: equal, config: loadConfigFrom(equal) }),
+      /must be inside the config directory/,
+    );
+
+    assert.equal(fs.existsSync(outside), false);
+    assert.equal(fs.existsSync(path.join(equal, "local-2.js")), false);
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("a failed legacy migration is not retried in the same process", async () => {
+  const dir = project({
+    config: `project:\n  name: "Broken"\n  extensions:\n    - ./missing.js\n`,
+  });
+  const warnings = [];
+  const reporter = { warn: (message) => warnings.push(message) };
+  try {
+    const options = { yes: true };
+    for (let attempt = 0; attempt < 2; attempt += 1)
+      await loadProjectState({
+        cwd: dir,
+        options,
+        reporter,
+        includeExtensions: false,
+      });
+    assert.equal(
+      warnings.filter((warning) => /Could not migrate/.test(warning)).length,
+      1,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rejects vendor roots outside or equal to the project directory", async () => {
   const dir = project({ extensions: { "local.js": SIGNALS } });
   const configPath = path.join(dir, "fx.yml");
@@ -1343,7 +1403,7 @@ test("rejects vendor roots outside or equal to the project directory", async () 
           source: "./local.js",
           vendorDir,
         }),
-        /vendor directory .* must be inside the project directory/,
+        /vendor directory .* must be inside the config directory/,
       );
     }
     assert.equal(fs.readFileSync(configPath, "utf8"), original);

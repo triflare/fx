@@ -334,8 +334,9 @@ function assertNoSymlinkPath(start, target, relative) {
 
 /** Resolve a relative vendor path and enforce the filesystem boundary. */
 function ensureVendorTarget(configDir, vendorDir, relative) {
-  const root = path.resolve(vendorDir);
-  const rootInside = path.relative(path.resolve(configDir), root);
+  const base = path.resolve(configDir);
+  const root = path.resolve(base, vendorDir);
+  const rootInside = path.relative(base, root);
   if (
     rootInside === "" ||
     rootInside === ".." ||
@@ -343,9 +344,11 @@ function ensureVendorTarget(configDir, vendorDir, relative) {
     path.isAbsolute(rootInside)
   )
     throw new VendorError(
-      `Refusing to access vendor directory ${root}: it must be inside the project directory`,
+      `Refusing to use vendor directory ${JSON.stringify(
+        relativeVendorPath(base, root) || ".",
+      )}: it must be inside the config directory`,
     );
-  const absolute = path.resolve(configDir, relative);
+  const absolute = path.resolve(base, relative);
   const inside = path.relative(root, absolute);
   if (
     inside === ".." ||
@@ -360,7 +363,7 @@ function ensureVendorTarget(configDir, vendorDir, relative) {
     );
   // Resolve links as well as lexical traversal: a project-controlled lock path
   // must not escape the vendor directory through a symlinked ancestor.
-  assertNoSymlinkPath(configDir, root, relative);
+  assertNoSymlinkPath(base, root, relative);
   const rootStat = fs.lstatSync(root, { throwIfNoEntry: false });
   if (rootStat?.isSymbolicLink())
     throw new VendorError(
