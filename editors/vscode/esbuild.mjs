@@ -5,8 +5,18 @@
 //   node esbuild.mjs          one-shot build -> dist/web/
 //   node esbuild.mjs --watch  rebuild on change
 import * as esbuild from "esbuild";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const watch = process.argv.includes("--watch");
+
+// Bundled sources live in the repository root, so their bare imports (such as
+// `js-yaml`) would resolve from the root node_modules. CI installs only this
+// package's dependencies, so search here as well.
+const nodeModules = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "node_modules",
+);
 
 /** @type {import("esbuild").BuildOptions} */
 const common = {
@@ -16,6 +26,7 @@ const common = {
   target: "es2022",
   // Provided by the extension host at runtime, never bundled.
   external: ["vscode"],
+  nodePaths: [nodeModules],
   sourcemap: true,
   logLevel: "info",
 };
