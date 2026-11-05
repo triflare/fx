@@ -26,6 +26,8 @@ updateSettings({
   },
 });
 
+const CI_VARS = ["CI", "GITHUB_ACTIONS", "TRAVIS", "JENKINS_URL", "CIRCLECI"];
+
 function cancelled() {
   return new CliError("Cancelled", {
     code: "CANCELLED",
@@ -59,7 +61,8 @@ export function createPrompts({
   input = process.stdin,
   output = process.stdout,
 } = {}) {
-  const enabled = tty && !noInput && !json;
+  const enabled =
+    tty && !noInput && !json && !CI_VARS.some((name) => process.env[name]);
   const common = { input, output };
 
   const requireFallback = (value, feature) => {

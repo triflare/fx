@@ -40,7 +40,8 @@ export async function addVendor({
     name,
     source: configSource,
     vendorDir: path.resolve(configDir, loaded.vendorDir || "extensions"),
-    unsandboxed: Boolean(options.unsandboxed),
+    unsandboxed: Boolean(options.unsandboxed) || Boolean(existing?.unsandboxed),
+    volatile: existing?.volatile,
   });
 
   reporter.success(

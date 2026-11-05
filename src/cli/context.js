@@ -15,6 +15,7 @@ import { loadVendorExtensions, migrateProjectExtensions } from "../vendor.js";
 import { UsageError } from "./errors.js";
 
 const warnedLegacy = new Set();
+const migrationDeclined = new Set();
 
 /** Split a positional input into a file or directory target. */
 export function resolveInput(input, cwd = process.cwd()) {
@@ -95,12 +96,23 @@ async function upgradeLegacyExtensions({
 }) {
   if (!loaded?.path || !loaded.project?.extensions?.length) return loaded;
   warnLegacyExtensions(loaded, reporter);
+  if (migrationDeclined.has(loaded.path)) return loaded;
   if (options.upgradePrompt === false || process.env.FX_NO_PROMPT === "1")
     return loaded;
 
   const auto = Boolean(options.yes);
   const interactive = !auto && Boolean(prompts?.enabled);
   if (!auto && !interactive) return loaded;
+  if (!auto) {
+    const upgrade = await prompts.confirm({
+      message: "Upgrade project.extensions to the vendor system?",
+      initialValue: true,
+    });
+    if (!upgrade) {
+      migrationDeclined.add(loaded.path);
+      return loaded;
+    }
+  }
 
   try {
     const result = await migrateProjectExtensions({
@@ -137,12 +149,18 @@ export async function loadProjectExtensions({ configDir, loaded, reporter }) {
   const extensionUrls = {};
   const unsandboxed = [];
   const config = loaded?.project || {};
+  const matchedUnsandboxed = new Set();
+  const unnecessaryUnsandboxed = new Set();
 
   if (loaded?.vendor && loaded.vendor.length > 0) {
     const vendored = await loadVendorExtensions({ configDir, config: loaded });
     Object.assign(catalog, vendored.catalog);
     Object.assign(extensionUrls, vendored.extensionUrls);
     unsandboxed.push(...vendored.unsandboxed);
+    for (const name of vendored.matchedUnsandboxed || [])
+      matchedUnsandboxed.add(name);
+    for (const name of vendored.unnecessaryUnsandboxed || [])
+      unnecessaryUnsandboxed.add(name);
     for (const warning of vendored.warnings) reporter.warn(warning);
   }
 
@@ -151,11 +169,28 @@ export async function loadProjectExtensions({ configDir, loaded, reporter }) {
     const legacy = await loadExtensions(config.extensions, {
       baseDir: configDir,
       expectUnsandboxed: config.unsandboxed,
+      reportUnmatchedUnsandboxed: false,
     });
     Object.assign(catalog, legacy.catalog);
     Object.assign(extensionUrls, legacy.extensionUrls);
     unsandboxed.push(...legacy.unsandboxed);
+    for (const name of legacy.matchedUnsandboxed || [])
+      matchedUnsandboxed.add(name);
+    for (const name of legacy.unnecessaryUnsandboxed || [])
+      unnecessaryUnsandboxed.add(name);
     for (const warning of legacy.warnings) reporter.warn(warning);
+  }
+
+  for (const name of new Set(config.unsandboxed || [])) {
+    if (unnecessaryUnsandboxed.has(name)) {
+      reporter.warn(
+        `project.unsandboxed entry "${name}" loads in the sandbox; remove it from fx.yml`,
+      );
+    } else if (!matchedUnsandboxed.has(name)) {
+      reporter.warn(
+        `project.unsandboxed entry "${name}" does not match any loaded extension`,
+      );
+    }
   }
 
   return { catalog, extensionUrls, unsandboxed };

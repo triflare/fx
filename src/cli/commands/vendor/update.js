@@ -5,9 +5,9 @@ import { loadVendorConfig, requireConfigPath } from "./helpers.js";
 
 export const vendorUpdateCommand = {
   name: "update",
-  summary: "Re-fetch vendored extensions and show diffs",
-  description: `Re-fetch upstream sources, show a diff, and accept changes. Use
---dry-run to inspect without writing.`,
+  summary: "Update vendored extensions and show diffs",
+  description: `Re-fetch upstream sources, update the vendored copies, and show a
+diff for each change. Use --dry-run to preview without writing.`,
   arguments: ["[name]"],
   options: [
     { flags: "--dry-run", description: "Show diffs without writing files" },
