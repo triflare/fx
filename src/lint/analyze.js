@@ -220,6 +220,8 @@ function buildTargets(program) {
     name: "Stage",
     isStage: true,
     loc: stageLoc,
+    // Only a real `stage {` block has a brace to insert declarations into.
+    openLine: program.stage ? (program.stage.loc?.line ?? 1) : null,
     items: stageItems,
     decls: collectDeclarations(stageItems),
     usage: { vars: new Set(), lists: new Set(), funcs: new Set() },
@@ -228,6 +230,7 @@ function buildTargets(program) {
     name: sprite.name,
     isStage: false,
     loc: sprite.loc,
+    openLine: sprite.loc?.line ?? null,
     items: sprite.body,
     decls: collectDeclarations(sprite.body),
     usage: { vars: new Set(), lists: new Set(), funcs: new Set() },
@@ -623,12 +626,16 @@ class Analyzer {
         `Assignment to undeclared variable ${JSON.stringify(statement.name)}; declare it with \`let ${statement.name} = <value>;\`.`,
         {
           length: statement.name.length,
-          fix: {
-            kind: "declare-variable",
-            name: statement.name,
-            targetLine: state.env.target.loc?.line ?? 1,
-            indent: "    ",
-          },
+          fix:
+            state.env.target.openLine == null
+              ? null
+              : {
+                  kind: "declare-variable",
+                  name: statement.name,
+                  file: state.env.target.loc?.file ?? null,
+                  targetLine: state.env.target.openLine,
+                  indent: "    ",
+                },
         },
       );
     } else {
@@ -700,6 +707,9 @@ class Analyzer {
     const { stage, sprites, globals } = buildTargets(program);
     for (const target of [stage, ...sprites])
       this.analyzeTarget(target, globals);
+    // Sprite reads feed `globalUsage`, so unused stage names are decided only
+    // after every target has been analyzed.
+    this.checkGlobalUsage(globals);
     return this.diagnostics;
   }
 
@@ -707,7 +717,7 @@ class Analyzer {
     const env = { target, globals };
     for (const item of target.items) {
       if (item.type === "VarDecl" || item.type === "ListDecl")
-        this.checkInitializer(item, target);
+        this.checkInitializer(item, target, globals);
     }
 
     for (const item of target.items) {
@@ -752,7 +762,7 @@ class Analyzer {
   }
 
   /** FX203: initializers that read a declaration made later in the target. */
-  checkInitializer(decl, target) {
+  checkInitializer(decl, target, globals) {
     const index = new Map();
     target.items.forEach((item, position) => {
       if (item.type !== "VarDecl" && item.type !== "ListDecl") return;
@@ -760,7 +770,7 @@ class Analyzer {
     });
     const position = target.items.indexOf(decl);
     const state = {
-      env: { target, globals: target.decls },
+      env: { target, globals },
       params: null,
       func: null,
       funcDepth: 0,
@@ -886,7 +896,8 @@ class Analyzer {
       }
     }
 
-    // Unused declarations.
+    // Unused declarations. Stage (global) names are checked separately, once
+    // every sprite has had a chance to read them.
     if (!target.isStage) {
       for (const [name, decl] of decls.vars) {
         if (!target.usage.vars.has(name))
@@ -894,15 +905,6 @@ class Analyzer {
       }
       for (const [name, decl] of decls.lists) {
         if (!target.usage.lists.has(name))
-          this.reportUnused(decl, "list", name);
-      }
-    } else {
-      for (const [name, decl] of globals.vars) {
-        if (!this.globalUsage.vars.has(name))
-          this.reportUnused(decl, "variable", name);
-      }
-      for (const [name, decl] of globals.lists) {
-        if (!this.globalUsage.lists.has(name))
           this.reportUnused(decl, "list", name);
       }
     }
@@ -926,6 +928,18 @@ class Analyzer {
           );
         }
       }
+    }
+  }
+
+  /** FX208: stage names that no target reads, after all targets ran. */
+  checkGlobalUsage(globals) {
+    for (const [name, decl] of globals.vars) {
+      if (!this.globalUsage.vars.has(name))
+        this.reportUnused(decl, "variable", name);
+    }
+    for (const [name, decl] of globals.lists) {
+      if (!this.globalUsage.lists.has(name))
+        this.reportUnused(decl, "list", name);
     }
   }
 
@@ -1280,6 +1294,9 @@ export function applyFixes(sources, diagnostics) {
   for (const diagnostic of diagnostics) {
     if (!diagnostic.fix || diagnostic.fix.kind !== "declare-variable") continue;
     if (!diagnostic.file || !textByFile.has(diagnostic.file)) continue;
+    // A target in another file has no brace to insert into; never apply a fix
+    // to a file other than the one that reported it.
+    if (diagnostic.fix.file !== diagnostic.file) continue;
     const byLine = inserts.get(diagnostic.file) ?? new Map();
     const line = diagnostic.fix.targetLine ?? 1;
     const names = byLine.get(line) ?? new Set();

@@ -9,6 +9,7 @@ import { formatSource } from "../src/formatter.js";
 import { lintSources } from "../src/linter.js";
 import { parseConfig } from "../src/config.js";
 import {
+  effectivePreset,
   normalizeLintConfig,
   resolveRuleSeverities,
 } from "../src/lint/config.js";
@@ -264,6 +265,48 @@ test("resolves configured rule severities", () => {
   assert.equal(severities.get("FX404"), "off");
   assert.equal(severities.get("FX901"), "off");
   assert.equal(severities.get("FX203"), "off");
+});
+
+test("strict escalates weaker presets without downgrading stronger ones", () => {
+  assert.equal(
+    effectivePreset({ extends: "minimal", rules: {} }, true),
+    "strict",
+  );
+  assert.equal(effectivePreset({ extends: "all", rules: {} }, true), "all");
+  assert.equal(effectivePreset({ extends: "all", rules: {} }, false), "all");
+});
+
+test("stage names read by sprites are not reported unused", () => {
+  const source = `let score = 0;
+
+sprite "Cat" {
+    when greenFlag {
+        score = 1;
+    }
+}`;
+  assert.ok(!ruleIds(lint(source, { strict: true })).includes("FX208"));
+});
+
+test("FX204 only offers a fix inside the target that owns the declaration", () => {
+  const sprite = lintSources({
+    sources: [
+      {
+        file: FILE,
+        source:
+          'sprite "Cat" {\n    when greenFlag {\n        count = 1;\n    }\n}',
+      },
+    ],
+  }).diagnostics.find((entry) => entry.ruleId === "FX204");
+  assert.ok(sprite);
+  assert.equal(sprite.fix.file, FILE);
+  assert.equal(sprite.fix.targetLine, 1);
+
+  // A stage script without a `stage {` block has no brace to insert into.
+  const stage = lintSources({
+    sources: [{ file: FILE, source: "when greenFlag {\n    count = 1;\n}\n" }],
+  }).diagnostics.find((entry) => entry.ruleId === "FX204");
+  assert.ok(stage);
+  assert.equal(stage.fix, undefined);
 });
 
 test("editor config reader exposes lint settings", () => {
@@ -551,6 +594,24 @@ test("lint does not change files without --fix, and repairs FX204 with it", () =
     const after = fs.readFileSync(path.join(dir, FILE), "utf8");
     assert.match(after, /\n {4}let count = 0;\n/);
     assert.match(after, /when greenFlag/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("lint --strict keeps a stronger preset and reports it", () => {
+  const dir = project(
+    'sprite "Cat" {\n    when greenFlag {\n        looks.show();\n    }\n}\n',
+  );
+  try {
+    fs.writeFileSync(
+      path.join(dir, "fx.yml"),
+      'project:\n  name: "Demo"\nfx:\n  lint:\n    extends: all\n',
+    );
+    const result = run(["lint", "--json", "--strict"], dir);
+    const document = JSON.parse(result.stdout);
+    assert.equal(document.data.preset, "all");
+    assert.equal(document.data.strict, true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

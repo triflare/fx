@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./parser.js";
-import { readLock, verifyVendor } from "./vendor.js";
+import { LOCK_FILENAME, readLock, verifyVendor } from "./vendor.js";
 import {
   META_RULES,
   applyFixes,
@@ -185,7 +185,7 @@ function extensionDiagnostics({
         problem(
           "FX707",
           file,
-          `Extension ${JSON.stringify(record.name)} does not match \`${path.basename(configPath ?? "fx.lock")}\`; run \`fx vendor verify\` for details.`,
+          `Extension ${JSON.stringify(record.name)} does not match \`${LOCK_FILENAME}\`; run \`fx vendor verify\` for details.`,
         ),
       );
     }

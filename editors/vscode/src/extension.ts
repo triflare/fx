@@ -1,7 +1,13 @@
 import * as vscode from "vscode";
 import { CATALOG, LIST_OPS, blockNames } from "../../../src/catalog.js";
 import { FxError } from "../../../src/errors.js";
-import { FxQuickFixProvider, lintDocument, publishDiagnostics } from "./lint";
+import {
+  FxQuickFixProvider,
+  beginLintRun,
+  lintDocument,
+  publishDiagnostics,
+  publishFailure,
+} from "./lint";
 
 const LANGUAGE_ID = "fx";
 const DEBOUNCE_MS = 300;
@@ -178,11 +184,14 @@ async function refreshDiagnostics(
 ): Promise<void> {
   if (document.languageId !== LANGUAGE_ID) return;
 
+  const runId = beginLintRun();
   try {
     const project = await lintDocument(document);
-    publishDiagnostics(collection, project);
+    publishDiagnostics(collection, project, runId);
   } catch (error) {
-    collection.set(document.uri, [toDiagnostic(error, document)]);
+    publishFailure(collection, document, runId, () =>
+      toDiagnostic(error, document),
+    );
   }
 }
 

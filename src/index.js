@@ -12,6 +12,7 @@ export { formatSource } from "./formatter.js";
 export { applyFixes, lintSources, sortDiagnostics } from "./linter.js";
 export {
   DEFAULT_LINT,
+  effectivePreset,
   normalizeLintConfig,
   resolveRuleSeverities,
 } from "./lint/config.js";

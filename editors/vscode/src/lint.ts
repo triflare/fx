@@ -19,6 +19,7 @@ interface LintDiagnostic {
   fix?: {
     kind: string;
     name: string;
+    file?: string | null;
     targetLine?: number;
     indent?: string;
   };
@@ -31,6 +32,16 @@ interface LintProject {
 
 /** Fix descriptors for the diagnostics currently published, by location. */
 const fixes = new Map<string, NonNullable<LintDiagnostic["fix"]>>();
+
+/** Last run that published per document URI, so stale runs can be ignored. */
+const publishedRuns = new Map<string, number>();
+let nextRunId = 0;
+
+/** Start a lint run; pass the id to the publish helpers below. */
+export function beginLintRun(): number {
+  nextRunId += 1;
+  return nextRunId;
+}
 
 function fixKey(uri: vscode.Uri, line: number, character: number): string {
   return `${uri.toString()}:${line}:${character}`;
@@ -85,21 +96,27 @@ async function findConfig(
 export async function lintDocument(
   document: vscode.TextDocument,
 ): Promise<LintProject> {
-  const open = new Map<string, vscode.TextDocument>();
-  for (const candidate of vscode.workspace.textDocuments) {
-    if (candidate.languageId === LANGUAGE_ID)
-      open.set(candidate.uri.toString(), candidate);
-  }
-  open.set(document.uri.toString(), document);
-
   // Unsaved buffers are linted on their own: merging unrelated scratch files
   // into a project would invent duplicate-sprite and scope errors.
   const untitled = document.uri.scheme === "untitled";
-  const projectDocuments = untitled ? [document] : [...open.values()];
   const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-  let configUri: vscode.Uri | null = null;
-  if (!untitled)
-    configUri = await findConfig(directoryOf(document.uri), folder?.uri);
+  const configUri = untitled
+    ? null
+    : await findConfig(directoryOf(document.uri), folder?.uri);
+  const projectRoot = configUri ? directoryOf(configUri) : null;
+
+  // Scope the run to the discovered project. Without an fx.yml there is no
+  // project to merge, so fall back to linting the current document only.
+  const projectDocuments: vscode.TextDocument[] = [document];
+  if (projectRoot) {
+    for (const candidate of vscode.workspace.textDocuments) {
+      if (candidate.languageId !== LANGUAGE_ID) continue;
+      if (candidate.uri.scheme === "untitled") continue;
+      if (candidate.uri.toString() === document.uri.toString()) continue;
+      if (isInside(candidate.uri, projectRoot))
+        projectDocuments.push(candidate);
+    }
+  }
 
   let parsed: ReturnType<typeof parseProjectConfigText> | null = null;
   if (configUri) {
@@ -111,10 +128,10 @@ export async function lintDocument(
   }
 
   const sources = new Map<string, string>();
-  if (!untitled && configUri && folder) {
+  if (projectRoot) {
     try {
       const found = await vscode.workspace.findFiles(
-        new vscode.RelativePattern(folder, "**/*.tfx"),
+        new vscode.RelativePattern(projectRoot, "**/*.tfx"),
         EXCLUDED,
       );
       await Promise.all(
@@ -185,18 +202,56 @@ function toDiagnostic(
   return diagnostic;
 }
 
-/** Publish grouped diagnostics for every open document in the project. */
+/** Mark `runId` as the latest publisher for a document, if it still is. */
+function claim(uriKey: string, runId: number): boolean {
+  if ((publishedRuns.get(uriKey) ?? 0) > runId) return false;
+  publishedRuns.set(uriKey, runId);
+  return true;
+}
+
+/** Drop fix descriptors published for the document's previous diagnostics. */
+function clearFixes(uriKey: string): void {
+  const prefix = `${uriKey}:`;
+  for (const key of [...fixes.keys()])
+    if (key.startsWith(prefix)) fixes.delete(key);
+}
+
+/**
+ * Publish grouped diagnostics for every open document in the project. A run
+ * that a newer run has already superseded publishes nothing.
+ */
 export function publishDiagnostics(
   collection: vscode.DiagnosticCollection,
   project: LintProject,
+  runId: number,
 ): void {
   for (const document of project.documents) {
-    const diagnostics = project.groups.get(document.uri.toString()) ?? [];
+    const key = document.uri.toString();
+    if (!claim(key, runId)) continue;
+    clearFixes(key);
+    const diagnostics = project.groups.get(key) ?? [];
     collection.set(
       document.uri,
       diagnostics.map((entry) => toDiagnostic(entry, document)),
     );
   }
+}
+
+/**
+ * Publish a single failure diagnostic, unless a newer run already published
+ * for the document. The diagnostic is built lazily so superseded runs do no
+ * work and cannot overwrite fresher state.
+ */
+export function publishFailure(
+  collection: vscode.DiagnosticCollection,
+  document: vscode.TextDocument,
+  runId: number,
+  makeDiagnostic: () => vscode.Diagnostic,
+): void {
+  const key = document.uri.toString();
+  if (!claim(key, runId)) return;
+  clearFixes(key);
+  collection.set(document.uri, [makeDiagnostic()]);
 }
 
 /** Offer the FX204 declaration insertion as an editor quick fix. */
@@ -219,6 +274,7 @@ export class FxQuickFixProvider implements vscode.CodeActionProvider {
         ),
       );
       if (!fix) continue;
+      if (fix.file !== document.uri.toString()) continue;
       const action = new vscode.CodeAction(
         `Declare \`let ${fix.name} = 0;\``,
         vscode.CodeActionKind.QuickFix,

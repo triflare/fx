@@ -3,7 +3,11 @@ import path from "node:path";
 import { sourceExtension } from "../../brand.js";
 import { discoverSources } from "../../project.js";
 import { applyFixes, lintSources } from "../../linter.js";
-import { normalizeLintConfig, parseRuleOption } from "../../lint/config.js";
+import {
+  effectivePreset,
+  normalizeLintConfig,
+  parseRuleOption,
+} from "../../lint/config.js";
 import { PRESET_NAMES, ruleById } from "../../lint/rules.js";
 import { loadProjectState, resolveInput } from "../context.js";
 import { outcome } from "../define-command.js";
@@ -167,6 +171,7 @@ Exit status is 1 when errors are reported, or when warnings are reported with
       state.loaded,
       product,
     );
+    const preset = effectivePreset(lintConfig, Boolean(options.strict));
 
     const lintOptions = {
       config: state.loaded,
@@ -209,11 +214,11 @@ Exit status is 1 when errors are reported, or when warnings are reported with
         if (errors > 0) parts.push(plural(errors, "error"));
         if (warnings > 0) parts.push(plural(warnings, "warning"));
         reporter.error(
-          `${parts.join(", ")} in ${plural(files.length, "file")} (${lintConfig.extends} preset)`,
+          `${parts.join(", ")} in ${plural(files.length, "file")} (${preset} preset)`,
         );
       } else {
         reporter.success(
-          `Linted ${plural(files.length, "file")}: no problems (${lintConfig.extends} preset)`,
+          `Linted ${plural(files.length, "file")}: no problems (${preset} preset)`,
         );
       }
     }
@@ -228,7 +233,7 @@ Exit status is 1 when errors are reported, or when warnings are reported with
     return outcome({
       exitCode,
       data: {
-        preset: lintConfig.extends,
+        preset,
         strict: failsOnWarnings,
         fixed,
         files: files.map((file) => displayPath(cwd, file)),

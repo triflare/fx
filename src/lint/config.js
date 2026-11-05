@@ -100,11 +100,29 @@ export function normalizeLintConfig(
 }
 
 /**
+ * The preset a run actually uses: `strict` raises a weaker configured preset
+ * but never downgrades a stronger one such as `all`.
+ *
+ * @param {ReturnType<typeof normalizeLintConfig>} [lint]
+ * @param {boolean} [strict]
+ * @returns {string}
+ */
+export function effectivePreset(lint = DEFAULT_LINT, strict = false) {
+  const configured = PRESET_NAMES.includes(lint?.extends)
+    ? lint.extends
+    : DEFAULT_LINT.extends;
+  if (!strict) return configured;
+  return PRESET_NAMES.indexOf(configured) >= PRESET_NAMES.indexOf("strict")
+    ? configured
+    : "strict";
+}
+
+/**
  * Resolve every rule's effective severity for a lint run.
  *
  * Presets only decide which rules start enabled; overrides can enable a rule
  * outside the preset or turn one off. `strict` escalates the preset even when
- * `fx.yml` asks for something lower.
+ * `fx.yml` asks for something lower, without downgrading a stronger preset.
  *
  * @param {ReturnType<typeof normalizeLintConfig>} [lint]
  * @param {{strict?: boolean, overrides?: Record<string, string>}} [options]
@@ -114,7 +132,7 @@ export function resolveRuleSeverities(
   lint = DEFAULT_LINT,
   { strict = false, overrides = {} } = {},
 ) {
-  const presetName = strict ? "strict" : (lint.extends ?? DEFAULT_LINT.extends);
+  const presetName = effectivePreset(lint, strict);
   const enabled = new Set(PRESETS[presetName] ?? PRESETS.recommended);
   const severities = new Map();
   for (const id of Object.keys(RULES)) {
