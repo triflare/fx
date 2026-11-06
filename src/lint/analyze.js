@@ -550,12 +550,12 @@ class Analyzer {
       case "HatDecl":
         break;
       case "If": {
-        const value = staticValue(statement.cond);
-        if (value !== null) {
+        const constant = staticBoolean(statement.cond);
+        if (constant !== null) {
           this.report(
             "FX403",
             statement.cond.loc,
-            `Condition is always ${truthy(value) ? "true" : "false"}, so one branch is dead.`,
+            `Condition is always ${constant}, so one branch is dead.`,
             { length: 1 },
           );
         }
@@ -580,19 +580,16 @@ class Analyzer {
         break;
       }
       case "While": {
-        const value = staticValue(statement.cond);
-        if (value !== null) {
+        const constant = staticBoolean(statement.cond);
+        if (constant !== null) {
           this.report(
             "FX302",
             statement.cond.loc,
-            `Loop condition is always ${truthy(value) ? "true" : "false"}.`,
+            `Loop condition is always ${constant}.`,
             { length: 1 },
           );
         }
-        if (
-          staticBoolean(statement.cond) === true &&
-          !this.bodyYields(statement.body, state)
-        ) {
+        if (constant === true && !this.bodyYields(statement.body, state)) {
           this.report(
             "FX301",
             statement.loc,
