@@ -46,23 +46,30 @@ stage {
     when stageClicked {
         looks.nextBackdrop();
     }
+
     when backdropSwitchesTo("backdrop1") {
         looks.switchBackdrop("backdrop1");
     }
+
     when broadcast("stage ping") {
         looks.nextBackdrop();
     }
+
     when loudnessGreaterThan(10) {
     }
+
     when timerGreaterThan(10) {
     }
+
     when keyPressed("space") {
     }
 }
 
 sprite "AllBlocks" {
     layer: 1;
-    costumes: { idle: "../../../assets/costumes/player_idle.svg" };
+    costumes: {
+        idle: "../../../assets/costumes/player_idle.svg"
+    };
 
     let score = 0;
     let flag = false;
@@ -72,18 +79,21 @@ sprite "AllBlocks" {
     function noop() {
         looks.show();
     }
+
     function bump(amount: number, loud: boolean) {
         score += amount;
         if (loud) {
             looks.say("bump");
         }
     }
+
     returning function label() {
         if (score > 10) {
             return "Pro";
         }
         return "Rookie";
     }
+
     warp function fastNoop() {
         motion.changeX(1);
     }
@@ -260,9 +270,9 @@ sprite "AllBlocks" {
 
         // ---- infix expressions & precedence -----------------------------
         looks.say(1 + 2 * 3 - 4 / 2 % 3);
-        if ((score > 0) and (score < 100)) {
+        if (score > 0 and score < 100) {
         }
-        if ((score == 0) or (score != 1)) {
+        if (score == 0 or score != 1) {
         }
         if (not (score < 0)) {
         }
@@ -279,12 +289,15 @@ sprite "AllBlocks" {
     when keyPressed("a") {
         score += 1;
     }
+
     when spriteClicked {
         looks.say("clicked");
     }
+
     when cloneStart {
         control.deleteThisClone();
     }
+
     when broadcast("scene ping") {
         looks.show();
     }
@@ -302,6 +315,7 @@ sprite "AllBlocks" {
     when keyPressed("q") {
         control.stop("all");
     }
+
     when keyPressed("w") {
         control.stop("this script");
     }

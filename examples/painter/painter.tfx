@@ -7,7 +7,9 @@
 
 sprite "Painter" {
     layer: 1;
-    costumes: { cat: "../../assets/costumes/player_idle.svg" };
+    costumes: {
+        cat: "../../assets/costumes/player_idle.svg"
+    };
 
     let hue = 0;
 

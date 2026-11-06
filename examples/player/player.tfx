@@ -14,8 +14,8 @@ sprite "Player Character" {
         running: "../../assets/costumes/player_run.svg"
     };
 
-    let speed = 6;       // pixels moved per frame while walking
-    let vy = 0;          // vertical velocity while jumping
+    let speed = 6; // pixels moved per frame while walking
+    let vy = 0; // vertical velocity while jumping
     let grounded = true;
     let steps = 0;
 
