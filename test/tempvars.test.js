@@ -181,6 +181,38 @@ tempvars.setThread("hello world", 1);
   assert.match(source, /tempvars\.setThread\("hello world", "1"\);/);
 });
 
+test("dynamic temp-variable names survive decompilation and recompilation", () => {
+  for (const name of ["sensing.answer()", "key"]) {
+    const { project } = compiled(`sprite "S" {
+let key = "hits";
+when greenFlag {
+tempvars.setThread(${name}, 1);
+tempvars.changeThread(${name}, 2);
+tempvars.setRuntime(${name}, 3);
+tempvars.changeRuntime(${name}, 4);
+looks.say(tempvars.thread(${name}));
+looks.say(tempvars.runtime(${name}));
+}
+}`);
+    for (const target of project.targets) target.costumes = [];
+    const source = decompileProject(project);
+    for (const method of [
+      "setThread",
+      "changeThread",
+      "setRuntime",
+      "changeRuntime",
+      "thread",
+      "runtime",
+    ]) {
+      assert.ok(source.includes(`tempvars.${method}(${name}`), source);
+    }
+    const rebuilt = compiled(source).project;
+    assert.deepEqual(opcodes(rebuilt), opcodes(project));
+    for (const target of rebuilt.targets) target.costumes = [];
+    assert.equal(decompileProject(rebuilt), source);
+  }
+});
+
 test("upstream lmsTempVars2 blocks stay plain calls", () => {
   const catalog = {
     "lmsTempVars2.setThreadVariable": {

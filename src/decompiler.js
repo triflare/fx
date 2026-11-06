@@ -268,8 +268,9 @@ class Decompiler {
   tempVarName(block) {
     const raw = (block.inputs || {}).VAR;
     const inner = Array.isArray(raw) ? raw[1] : null;
-    if (Array.isArray(inner)) return inner[1] == null ? null : String(inner[1]);
-    return inner == null ? null : String(inner);
+    if (!Array.isArray(inner) || ![4, 5, 6, 7, 8, 9, 10, 11].includes(inner[0]))
+      return null;
+    return inner[1] == null ? null : String(inner[1]);
   }
 
   /** Render set/change on a temporary variable, with sugar when the name is safe. */
@@ -280,8 +281,8 @@ class Decompiler {
     );
     if (name != null && SAFE_TEMP_NAME.test(name))
       return `${pad}${prefix}${name} ${op} ${value};`;
-    const literal = name == null ? '""' : `"${escapeString(name)}"`;
-    return `${pad}tempvars.${catalogName}(${literal}, ${value});`;
+    const input = this.renderExpression(block.inputs.VAR);
+    return `${pad}tempvars.${catalogName}(${input}, ${value});`;
   }
 
   renderStatement(block, indent) {
