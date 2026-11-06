@@ -49,6 +49,8 @@ const LIST_OPCODE_METHOD = {
   data_listcontainsitem: { method: "contains", inputs: ["ITEM"] },
 };
 
+const SAFE_TEMP_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 function escapeString(value) {
   return String(value)
     .replace(/\\/g, "\\\\")
@@ -172,6 +174,14 @@ class Decompiler {
     }
     if (block.opcode === "data_variable") return block.fields.VARIABLE[0];
     if (block.opcode === "data_listcontents") return block.fields.LIST[0];
+    if (block.opcode === "fxTempVars_getThreadVariable") {
+      const name = this.tempVarName(block);
+      if (name != null && SAFE_TEMP_NAME.test(name)) return `$${name}`;
+    }
+    if (block.opcode === "fxTempVars_getRuntimeVariable") {
+      const name = this.tempVarName(block);
+      if (name != null && SAFE_TEMP_NAME.test(name)) return `$$${name}`;
+    }
     if (
       Object.prototype.hasOwnProperty.call(LIST_OPCODE_METHOD, block.opcode)
     ) {
@@ -254,6 +264,26 @@ class Decompiler {
     return lines.filter(Boolean).join("\n");
   }
 
+  /** Literal name stored in a temporary-variable block's VAR input. */
+  tempVarName(block) {
+    const raw = (block.inputs || {}).VAR;
+    const inner = Array.isArray(raw) ? raw[1] : null;
+    if (Array.isArray(inner)) return inner[1] == null ? null : String(inner[1]);
+    return inner == null ? null : String(inner);
+  }
+
+  /** Render set/change on a temporary variable, with sugar when the name is safe. */
+  renderTempVarAssign(block, pad, prefix, op, catalogName) {
+    const name = this.tempVarName(block);
+    const value = this.renderExpression(
+      block.inputs.STRING ?? block.inputs.NUM,
+    );
+    if (name != null && SAFE_TEMP_NAME.test(name))
+      return `${pad}${prefix}${name} ${op} ${value};`;
+    const literal = name == null ? '""' : `"${escapeString(name)}"`;
+    return `${pad}tempvars.${catalogName}(${literal}, ${value});`;
+  }
+
   renderStatement(block, indent) {
     const pad = "    ".repeat(indent);
     const sub = (firstId) => {
@@ -289,6 +319,20 @@ class Decompiler {
         return `${pad}${this.renderProcedureCall(block)};`;
       case "control_stop":
         return `${pad}control.stop("${block.fields.STOP_OPTION[0]}");`;
+      case "fxTempVars_setThreadVariable":
+        return this.renderTempVarAssign(block, pad, "$", "=", "setThread");
+      case "fxTempVars_changeThreadVariable":
+        return this.renderTempVarAssign(block, pad, "$", "+=", "changeThread");
+      case "fxTempVars_setRuntimeVariable":
+        return this.renderTempVarAssign(block, pad, "$$", "=", "setRuntime");
+      case "fxTempVars_changeRuntimeVariable":
+        return this.renderTempVarAssign(
+          block,
+          pad,
+          "$$",
+          "+=",
+          "changeRuntime",
+        );
       default: {
         if (
           Object.prototype.hasOwnProperty.call(LIST_OPCODE_METHOD, block.opcode)

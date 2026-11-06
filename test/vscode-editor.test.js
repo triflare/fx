@@ -58,6 +58,8 @@ test("grammar: statement keywords match the parser", () => {
     "partial",
     "let",
     "cloud",
+    "thread",
+    "runtime",
     "list",
     "function",
     "returning",

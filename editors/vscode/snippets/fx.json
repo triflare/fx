@@ -49,6 +49,21 @@
     "body": ["cloud let ${1:name} = ${2:0};"],
     "description": "Declare a cloud variable (Stage only)"
   },
+  "thread let": {
+    "prefix": "threadlet",
+    "body": ["thread let ${1:name} = ${2:0};"],
+    "description": "Declare a variable that lives for this script run"
+  },
+  "runtime let": {
+    "prefix": "runtimelet",
+    "body": ["runtime let ${1:name} = ${2:0};"],
+    "description": "Declare a variable shared for this project run"
+  },
+  "thread increment": {
+    "prefix": "threadinc",
+    "body": ["$${1:name} += ${2:1};"],
+    "description": "Increment a thread temporary variable"
+  },
   "list": {
     "prefix": "list",
     "body": ["list ${1:name} = [${2}];"],

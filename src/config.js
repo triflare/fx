@@ -124,6 +124,32 @@ export function normalizeVendorEntry(name, raw) {
 }
 
 /**
+ * Normalize the top-level `features:` mapping. Values are file paths (or
+ * `{ file }` mappings), relative to the config directory.
+ *
+ * @param {unknown} raw
+ * @returns {Array<{name: string, file: string}>}
+ */
+export function normalizeFeatures(raw = {}) {
+  if (raw == null) return [];
+  if (!isPlainObject(raw))
+    throw new Error(`${configFilename()}: "features" must be a mapping`);
+  return Object.entries(raw).map(([name, value]) => {
+    const file =
+      typeof value === "string"
+        ? value
+        : isPlainObject(value) && typeof value.file === "string"
+          ? value.file
+          : null;
+    if (!file || file.trim() === "")
+      throw new Error(
+        `${configFilename()}: features.${name} must be a file path or { file: "<path>" }`,
+      );
+    return { name: String(name), file: file.trim() };
+  });
+}
+
+/**
  * Normalize the top-level `vendor:` mapping. Order is load order, so this is an
  * array rather than a plain object.
  *
@@ -426,6 +452,7 @@ export function parseConfig(text) {
     fx,
     package: normalizePackage(raw.package || {}),
     vendor: normalizeVendor(raw.vendor || {}),
+    features: normalizeFeatures(raw.features || {}),
     vendorDir: fx.vendorDir,
     raw,
   };
@@ -465,6 +492,7 @@ export function loadConfigFrom(dir) {
       fx,
       package: pkg,
       vendor,
+      features,
       vendorDir,
       raw,
     } = parseConfig(fs.readFileSync(found, "utf8"));
@@ -473,6 +501,7 @@ export function loadConfigFrom(dir) {
       fx,
       package: pkg,
       vendor,
+      features,
       vendorDir,
       raw,
       path: found,
@@ -483,6 +512,7 @@ export function loadConfigFrom(dir) {
     fx: { ...DEFAULT_FX },
     package: normalizePackage({}),
     vendor: [],
+    features: [],
     vendorDir: DEFAULT_VENDOR_DIR,
     raw: {},
     path: null,
