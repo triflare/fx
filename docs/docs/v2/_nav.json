@@ -1,0 +1,12 @@
+[
+  {
+    "text": "User Guide",
+    "link": "/guide/start/introduction",
+    "activeMatch": "/guide/"
+  },
+  {
+    "text": "Reference",
+    "link": "/reference/commands",
+    "activeMatch": "/reference/"
+  }
+]

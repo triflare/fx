@@ -1,0 +1,22 @@
+[
+  {
+    "type": "dir-section-header",
+    "name": "start",
+    "label": "Getting Started"
+  },
+  {
+    "type": "dir-section-header",
+    "name": "language",
+    "label": "Language"
+  },
+  {
+    "type": "dir-section-header",
+    "name": "extensions",
+    "label": "Extensions"
+  },
+  {
+    "type": "dir-section-header",
+    "name": "workflow",
+    "label": "Build Workflow"
+  }
+]

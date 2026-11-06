@@ -22,6 +22,7 @@ export default [
       "**/dist/**",
       // VS Code web builds downloaded by @vscode/test-web
       "**/.vscode-test-web/**",
+      "**/docs/**",
     ],
   },
   js.configs.recommended,

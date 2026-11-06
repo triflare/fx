@@ -1,0 +1,172 @@
+/*
+ * Triflare Fx docs — minimal ink theme.
+ *
+ * The stock Rspress theme is blue and purple with large radii, radial hero
+ * glows, and frosted cards. This file replaces that with a neutral ink palette,
+ * hairline dividers, flat surfaces, and tighter corners. Only CSS variables and
+ * a handful of surface rules are overridden, so layout, navigation, versioning,
+ * and code highlighting keep working unchanged.
+ */
+
+:root {
+  --rp-radius: 6px;
+  --rp-radius-small: 4px;
+  --rp-radius-large: 8px;
+
+  --rp-shadow-1: none;
+  --rp-shadow-2: none;
+  --rp-shadow-3: none;
+  --rp-shadow-4: none;
+  --rp-shadow-5: none;
+}
+
+/* Light mode */
+html:not(.rp-dark) {
+  --rp-c-bg: #ffffff;
+  --rp-c-bg-soft: #fafafa;
+  --rp-c-bg-mute: #f4f4f5;
+  --rp-c-bg-alt: #ffffff;
+  --rp-c-bg-dark: #f4f4f5;
+  --rp-c-divider: #00000021;
+  --rp-c-divider-light: #00000012;
+  --rp-c-divider-dark: #00000033;
+
+  --rp-c-text-0: #09090b;
+  --rp-c-text-1: #18181b;
+  --rp-c-text-2: #52525b;
+  --rp-c-text-3: #71717a;
+  --rp-c-text-4: #a1a1aa;
+  --rp-c-text-code: #3f3f46;
+  --rp-c-text-code-bg: #00000008;
+  --rp-c-text-code-border: #0000000a;
+
+  --rp-c-gray: #71717a;
+  --rp-c-gray-light-1: #a1a1aa;
+  --rp-c-gray-light-2: #d4d4d8;
+  --rp-c-gray-light-3: #e4e4e7;
+  --rp-c-gray-light-4: #f0f0f1;
+  --rp-c-gray-light-5: #fafafa;
+
+  --rp-c-brand: #18181b;
+  --rp-c-brand-light: #3f3f46;
+  --rp-c-brand-lighter: #e4e4e7;
+  --rp-c-brand-dark: #09090b;
+  --rp-c-brand-darker: #000000;
+  --rp-c-brand-tint: #18181b0f;
+  --rp-c-brand-rgb: 24, 24, 27;
+  --rp-c-link: #18181b;
+
+  --rp-home-hero-title-bg: #18181b;
+  --rp-home-hero-secondary-color: #18181b;
+  --rp-home-background-bg: #ffffff;
+  --rp-home-feature-bg: #ffffff;
+
+  --rp-code-block-bg: #fafafa;
+  --rp-code-title-bg: #f4f4f5;
+  --rp-code-block-border: 1px solid #00000012;
+  --rp-code-block-color: #27272a;
+}
+
+/* Dark mode */
+html.rp-dark {
+  --rp-c-bg: #0b0b0c;
+  --rp-c-bg-soft: #131315;
+  --rp-c-bg-mute: #1b1b1e;
+  --rp-c-bg-alt: #0b0b0c;
+  --rp-c-bg-dark: #1b1b1e;
+  --rp-c-divider: #ffffff26;
+  --rp-c-divider-light: #ffffff14;
+  --rp-c-divider-dark: #ffffff33;
+
+  --rp-c-text-0: #fafafa;
+  --rp-c-text-1: #f4f4f5;
+  --rp-c-text-2: #a1a1aa;
+  --rp-c-text-3: #71717a;
+  --rp-c-text-4: #52525b;
+  --rp-c-text-code: #d4d4d8;
+  --rp-c-text-code-bg: #ffffff0f;
+  --rp-c-text-code-border: #ffffff0f;
+
+  --rp-c-gray: #71717a;
+  --rp-c-gray-light-1: #52525b;
+  --rp-c-gray-light-2: #3f3f46;
+  --rp-c-gray-light-3: #3f3f46;
+  --rp-c-gray-light-4: #27272a;
+  --rp-c-gray-light-5: #1b1b1e;
+
+  --rp-c-brand: #e4e4e7;
+  --rp-c-brand-light: #d4d4d8;
+  --rp-c-brand-lighter: #3f3f46;
+  --rp-c-brand-dark: #f4f4f5;
+  --rp-c-brand-darker: #fafafa;
+  --rp-c-brand-tint: #e4e4e71a;
+  --rp-c-brand-rgb: 228, 228, 231;
+  --rp-c-link: #e4e4e7;
+
+  /* Light title so the gradient-clipped wordmark stays readable; the brand
+     button below gets dark text to match. */
+  --rp-home-hero-title-bg: #fafafa;
+  --rp-home-hero-secondary-color: #fafafa;
+  --rp-home-background-bg: #0b0b0c;
+  --rp-home-feature-bg: #0b0b0c;
+
+  --rp-code-block-bg: #131315;
+  --rp-code-title-bg: #1b1b1e;
+  --rp-code-block-border: 1px solid #ffffff14;
+  --rp-code-block-color: #e4e4e7;
+}
+
+/*
+ * Flat surfaces: no glows, blurs, gradients, or lifted cards.
+ *
+ * Rspress injects this stylesheet before its own theme CSS, so selectors that
+ * tie the stock rules on specificity would be overridden by them. The `html`
+ * prefix raises specificity without resorting to `!important`.
+ */
+html .rp-home-background {
+  background: var(--rp-home-background-bg);
+  filter: none;
+}
+
+html .rp-nav {
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+html .rp-home-hero__badge {
+  border-radius: var(--rp-radius-large);
+}
+
+html .rp-home-feature__card {
+  border: 1px solid var(--rp-c-divider-light);
+  border-radius: var(--rp-radius-large);
+  background: transparent;
+  backdrop-filter: none;
+  padding: 1.5rem;
+  transition: border-color 0.15s ease;
+}
+
+html.rp-dark .rp-button--brand {
+  color: #09090b;
+}
+
+html .rp-home-feature__card:hover {
+  border: 1px solid var(--rp-c-divider);
+  color: var(--rp-c-text-1);
+}
+
+html .rp-home-feature__icon {
+  border: 1px solid var(--rp-c-divider-light);
+  border-radius: var(--rp-radius);
+  background: transparent;
+}
+
+/* Code blocks read as quiet panels rather than floating cards. */
+html div[class*="language-"] {
+  border-radius: var(--rp-radius);
+  box-shadow: none;
+}
+
+html .rp-code-title {
+  border-radius: var(--rp-radius) var(--rp-radius) 0 0;
+}
