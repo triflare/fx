@@ -64,6 +64,7 @@ Open the `.pmp` file in [PenguinMod](https://studio.penguinmod.com/), then press
 | Turn on an extension-backed language feature | [Project features](/guide/extensions/features)                                  |
 | Import, export, or split a sprite            | [Sprites](/guide/extensions/sprites)                                            |
 | Format and lint your source                  | [Formatting](/guide/workflow/formatting) and [Linting](/guide/workflow/linting) |
+| Write and run project tests                  | [Testing](/guide/workflow/testing)                                              |
 | Preview, package, and share your project     | [Building and packaging](/guide/workflow/building)                              |
 | Turn an existing `.pmp` into source          | [Decompiling](/guide/workflow/decompiling)                                      |
 | Find a command or option                     | [Command reference](/reference/commands)                                        |

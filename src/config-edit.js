@@ -673,6 +673,78 @@ export function addFeatureEntry(configPath, name, file) {
   return { added, updated };
 }
 
+/** Read a raw `fx.<key>` value without normalising the rest of the config. */
+export function readFxValue(configPath, key) {
+  const raw = yaml.load(fs.readFileSync(configPath, "utf8")) ?? {};
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const fx = raw.fx;
+  if (!fx || typeof fx !== "object" || Array.isArray(fx)) return undefined;
+  return fx[key];
+}
+
+/**
+ * Set a scalar `fx.<key>` value while preserving the rest of the file.
+ *
+ * A nested block under the key (for example a hand-written `fx.tests:`
+ * mapping) is replaced by the scalar, so enabling and disabling a feature
+ * always leaves one canonical value behind.
+ *
+ * @param {string} configPath
+ * @param {string} key
+ * @param {string|number|boolean} value
+ * @returns {{changed: boolean}}
+ */
+export function setFxScalar(configPath, key, value) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const scalar = typeof value === "string" ? quote(value) : String(value);
+  const fx = topLevel(lines, "fx");
+
+  if (!fx) {
+    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n"))
+      lines[lines.length - 1] += eol;
+    lines.push(`fx:${eol}`, `  ${key}: ${scalar}${eol}`);
+    writeDocument(configPath, lines.join(""));
+    return { changed: true };
+  }
+
+  const { value: rest, comment } = splitComment(fx.rest);
+  if (rest !== "") {
+    if (!rest.startsWith("{") || !rest.endsWith("}"))
+      throw new Error("fx must be a block mapping to edit it");
+    const mapping = parseValue(rest);
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
+      throw new Error("fx must be a mapping to edit it");
+    if (mapping[key] === value) return { changed: false };
+    mapping[key] = value;
+    const dumped = yaml
+      .dump({ fx: mapping }, { lineWidth: -1, noRefs: true })
+      .split("\n")
+      .filter((line, index, all) => !(index === all.length - 1 && line === ""))
+      .map((line) => `${line}${eol}`);
+    if (comment) dumped[0] = `fx: ${comment}${eol}`;
+    replaceRange(lines, fx.index, fx.index + 1, dumped);
+    writeDocument(configPath, lines.join(""));
+    return { changed: true };
+  }
+
+  const end = sectionEnd(lines, fx.index);
+  const existing = mappingEntrySpans(lines, fx.index, end).find(
+    (span) => span.key === key,
+  );
+  if (existing) {
+    replaceRange(lines, existing.index, existing.end, [
+      `${existing.indent}${quoteKey(key)}: ${scalar}${eol}`,
+    ]);
+  } else {
+    const indent = childIndent(lines, fx.index, end);
+    insertAt(lines, end, [`${indent}${quoteKey(key)}: ${scalar}${eol}`], eol);
+  }
+  writeDocument(configPath, lines.join(""));
+  return { changed: true };
+}
+
 /**
  * Remove a `features:` entry.
  * @param {string} configPath

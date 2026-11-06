@@ -97,6 +97,7 @@ class Parser {
     const sprites = [];
     let stage = null;
     const topItems = [];
+    const tests = [];
 
     while (this.peek().type !== "eof") {
       if (
@@ -116,12 +117,38 @@ class Parser {
       ) {
         if (stage) this.fail("A project may only declare one stage");
         stage = this.parseStage();
+      } else if (
+        this.atIdent("test") &&
+        this.peek(1).type === "string" &&
+        this.peek(2).type === "punct" &&
+        this.peek(2).value === "{"
+      ) {
+        tests.push(this.parseTestDecl());
       } else {
         topItems.push(this.parseBodyItem());
       }
     }
 
-    return { type: "Program", stage, sprites, topItems };
+    return { type: "Program", stage, sprites, topItems, tests };
+  }
+
+  /** `test "name" { ... }` — only valid in test files. */
+  parseTestDecl() {
+    const tok = this.expect("test");
+    const name = this.expectType("string", "a test name string").value;
+    const body = this.parseBlockBody();
+    return { type: "TestDecl", name, body, loc: tok };
+  }
+
+  /** `expect <expression>[, "message"];` */
+  parseExpect() {
+    const tok = this.expect("expect");
+    const value = this.parseExpression();
+    let message = null;
+    if (this.eat(","))
+      message = this.expectType("string", "an assertion message string").value;
+    this.expect(";");
+    return { type: "Expect", value, message, loc: tok };
   }
 
   parseSprite(partial = false, startTok = null) {
@@ -207,6 +234,12 @@ class Parser {
         }
         case "when":
           return this.parseHat();
+        case "expect":
+          // `expect(...)` stays a normal call; the assertion form is the
+          // bare `expect <expression>;` statement.
+          if (!(this.peek(1).type === "punct" && this.peek(1).value === "("))
+            return this.parseExpect();
+          break;
         case "if":
           return this.parseIf();
         case "repeat":
@@ -474,6 +507,26 @@ class Parser {
     return { name: segments.join("."), segments, loc: tok };
   }
 
+  /**
+   * Postfix member access on a call result, as in
+   * `state.list("items").length`. Qualified identifiers already absorb their
+   * segments while they are parsed.
+   */
+  parseMemberAccess(expression) {
+    let node = expression;
+    while (this.atPunct(".") && this.peek(1).type === "ident") {
+      this.next();
+      const property = this.next();
+      node = {
+        type: "Member",
+        object: node,
+        property: property.value,
+        loc: property,
+      };
+    }
+    return node;
+  }
+
   parseExpressionList(closing) {
     const list = [];
     if (this.atPunct(closing)) return list;
@@ -607,13 +660,13 @@ class Parser {
       if (this.eat("(")) {
         const args = this.parseExpressionList(")");
         this.expect(")");
-        return {
+        return this.parseMemberAccess({
           type: "Call",
           name: name.name,
           segments: name.segments,
           args,
           loc: tok,
-        };
+        });
       }
       return {
         type: "Identifier",

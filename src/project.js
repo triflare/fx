@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { configFilename, sourceExtension } from "./brand.js";
 import { mergePrograms as mergeParsed } from "./merge.js";
+import { DEFAULT_TEST_PATTERN, matchesTestPattern } from "./test/discover.js";
 
 /** Directories never scanned for `.tfx` sources. */
 const IGNORED_DIRS = new Set([
@@ -21,12 +22,18 @@ const IGNORED_DIRS = new Set([
 
 /**
  * Recursively find every `.tfx` file under `dir`, skipping hidden entries and
- * well-known build/dependency directories. Results are deterministic (sorted by
- * path) so builds are reproducible.
+ * well-known build/dependency directories. Test files are skipped so they
+ * never become part of the project target.
+ *
+ * Results are deterministic (sorted by path) so builds are reproducible.
  * @param {string} dir
+ * @param {{testPattern?: string|null}} [options] `null` keeps test files
  * @returns {string[]} absolute file paths
  */
-export function discoverSources(dir) {
+export function discoverSources(
+  dir,
+  { testPattern = DEFAULT_TEST_PATTERN } = {},
+) {
   const root = path.resolve(dir);
   const found = [];
   const extension = sourceExtension().toLowerCase();
@@ -49,6 +56,10 @@ export function discoverSources(dir) {
         entry.isFile() &&
         entry.name.toLowerCase().endsWith(extension)
       ) {
+        if (testPattern) {
+          const relative = path.relative(root, full).split(path.sep).join("/");
+          if (matchesTestPattern(relative, testPattern)) continue;
+        }
         found.push(full);
       }
     }

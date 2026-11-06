@@ -11,6 +11,7 @@ import { initCommand } from "./init.js";
 import { lintCommand } from "./lint.js";
 import { packageCommand } from "./package.js";
 import { registerSprite } from "./sprite/index.js";
+import { testCommand } from "./test.js";
 import { registerVendor } from "./vendor/index.js";
 import { defineCommand } from "../define-command.js";
 
@@ -24,6 +25,7 @@ const TOP_LEVEL = [
   fmtCommand,
   catalogCommand,
   featureCommand,
+  testCommand,
   initCommand,
   completionCommand,
 ];

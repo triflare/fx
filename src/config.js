@@ -27,14 +27,90 @@ export const DEFAULT_PROJECT = {
 };
 
 /**
+ * Deterministic defaults for `fx test`. Virtual time is derived from
+ * `ticksPerSecond`; `seed` seeds the pseudo-random generator for the run.
+ */
+export const DEFAULT_TESTS = {
+  pattern: "test/**/*.test.tfx",
+  seed: 12345,
+  timeout: 1000,
+  ticksPerSecond: 30,
+  failOnRuntimeError: true,
+  parallel: false,
+};
+
+/**
  * Fx-only settings that never reach PenguinMod's project runtime config.
  * Kept in a separate top-level `fx:` block in fx.yml.
  */
 export const DEFAULT_FX = {
   partialSprites: false,
   vendorDir: "extensions",
+  tests: false,
   lint: { ...DEFAULT_LINT, rules: { ...DEFAULT_LINT.rules } },
 };
+
+/**
+ * Normalize the `fx.tests` setting.
+ *
+ * `true` enables testing with the defaults, `false` (or an absent key)
+ * disables it, and a mapping may override any default. The mapping form is
+ * what `fx feature tests enable` writes and later edits by hand.
+ *
+ * @param {unknown} value
+ * @returns {false | (typeof DEFAULT_TESTS & {enabled: true})}
+ */
+export function normalizeTestConfig(value) {
+  if (value == null || value === false) return false;
+  if (value === true) return { enabled: true, ...DEFAULT_TESTS };
+  if (!isPlainObject(value))
+    throw new Error(
+      `${configFilename()}: fx.tests must be true, false, or a mapping`,
+    );
+
+  const unknown = Object.keys(value).filter(
+    (key) => !Object.hasOwn(DEFAULT_TESTS, key),
+  );
+  if (unknown.length)
+    throw new Error(
+      `${configFilename()}: unknown fx.tests setting(s): ${unknown
+        .map((key) => `"${key}"`)
+        .join(", ")}`,
+    );
+
+  const tests = { enabled: true, ...DEFAULT_TESTS };
+  if (value.pattern != null) {
+    if (typeof value.pattern !== "string" || value.pattern.trim() === "")
+      throw new Error(`${configFilename()}: fx.tests.pattern must be a glob`);
+    tests.pattern = value.pattern.trim();
+  }
+  if (value.seed != null) {
+    const seed = Number(value.seed);
+    if (!Number.isFinite(seed))
+      throw new Error(`${configFilename()}: fx.tests.seed must be a number`);
+    tests.seed = seed;
+  }
+  if (value.timeout != null) {
+    const timeout = Number(value.timeout);
+    if (!Number.isFinite(timeout) || timeout <= 0)
+      throw new Error(
+        `${configFilename()}: fx.tests.timeout must be a positive number of milliseconds`,
+      );
+    tests.timeout = timeout;
+  }
+  if (value.ticksPerSecond != null) {
+    const ticks = Number(value.ticksPerSecond);
+    if (!Number.isFinite(ticks) || ticks <= 0)
+      throw new Error(
+        `${configFilename()}: fx.tests.ticksPerSecond must be positive`,
+      );
+    tests.ticksPerSecond = ticks;
+  }
+  if (value.failOnRuntimeError != null)
+    tests.failOnRuntimeError = Boolean(value.failOnRuntimeError);
+  if (value.parallel != null) tests.parallel = Boolean(value.parallel);
+  return tests;
+}
 
 /** Default directory that receives vendored extension sources. */
 export const DEFAULT_VENDOR_DIR = "extensions";
@@ -418,6 +494,7 @@ export function normalizeFx(raw = {}) {
         throw new Error(`${configFilename()}: fx.vendorDir must be a path`);
       fx.vendorDir = raw.vendorDir.trim();
     }
+    if (raw.tests !== undefined) fx.tests = normalizeTestConfig(raw.tests);
     fx.lint = normalizeLintConfig(
       raw.lint,
       (message) => new Error(`${configFilename()}: ${message}`),

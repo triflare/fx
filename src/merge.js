@@ -43,6 +43,13 @@ export function mergePrograms(
   const groups = new Map();
 
   for (const { ast, file } of entries) {
+    if (ast.tests && ast.tests.length > 0)
+      throw new ParseError(
+        `Test ${JSON.stringify(ast.tests[0].name)} is declared in a project source. ` +
+          `Move test declarations to a test file (for example ` +
+          `test/score.test.tfx); ordinary builds never compile test files.`,
+        errorInfo(ast.tests[0].loc),
+      );
     if (ast.stage) {
       if (stage) {
         throw new ParseError(
