@@ -3,7 +3,7 @@ import { loadProjectState } from "../context.js";
 import { CliError } from "../errors.js";
 import { outcome } from "../define-command.js";
 import { createTestReporter, REPORTER_NAMES } from "../../test/reporters.js";
-import { runTests, TEST_EXIT } from "../../test/runner.js";
+import { runTests, TestError, TEST_EXIT } from "../../test/runner.js";
 
 const WATCH_IGNORED = /(^|\/)(node_modules|build|dist|\.git|doc_build)(\/|$)/;
 
@@ -32,14 +32,18 @@ function validateNumber(value, label) {
 }
 
 /** Wait for the next source or config change. */
-function nextChange(dir) {
+function nextChange(dir, signal) {
   return new Promise((resolve, reject) => {
     let watcher;
     let timer = null;
     const done = () => {
+      if (timer) clearTimeout(timer);
       watcher?.close();
+      signal.removeEventListener("abort", done);
       resolve();
     };
+    if (signal.aborted) return done();
+    signal.addEventListener("abort", done, { once: true });
     try {
       watcher = fs.watch(dir, { recursive: true }, (event, filename) => {
         if (!filename) return;
@@ -50,6 +54,7 @@ function nextChange(dir) {
         timer = setTimeout(done, 80);
       });
     } catch (error) {
+      signal.removeEventListener("abort", done);
       reject(error);
     }
   });
@@ -129,13 +134,26 @@ it with "fx feature tests enable".`,
     };
 
     if (!options.watch) {
-      const result = await runOnce();
-      return outcome({ data: result, exitCode: result.exitCode });
+      try {
+        const result = await runOnce();
+        return outcome({ data: result, exitCode: result.exitCode });
+      } catch (error) {
+        if (error instanceof TestError)
+          throw new CliError(error.message, {
+            code: "TEST_ERROR",
+            exitCode: error.exitCode,
+            hint: error.hint,
+            cause: error,
+          });
+        throw error;
+      }
     }
 
+    const controller = new AbortController();
     let interrupted = false;
     const onInterrupt = () => {
       interrupted = true;
+      controller.abort();
     };
     process.once("SIGINT", onInterrupt);
     try {
@@ -144,11 +162,12 @@ it with "fx feature tests enable".`,
         if (interrupted)
           return outcome({ data: result, exitCode: TEST_EXIT.INTERRUPTED });
         reporter.info("Watching for changes... (Ctrl+C to stop)");
-        await nextChange(result.dir);
+        await nextChange(result.dir, controller.signal);
         if (interrupted)
           return outcome({ data: result, exitCode: TEST_EXIT.INTERRUPTED });
       }
     } finally {
+      controller.abort();
       process.off("SIGINT", onInterrupt);
     }
   },

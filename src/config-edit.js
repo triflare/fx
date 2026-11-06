@@ -734,7 +734,13 @@ export function setFxScalar(configPath, key, value) {
     (span) => span.key === key,
   );
   if (existing) {
-    replaceRange(lines, existing.index, existing.end, [
+    let entryEnd = existing.end;
+    while (
+      entryEnd > existing.index + 1 &&
+      /^(?:[ \t]*#.*|[ \t]*)$/.test(content(lines[entryEnd - 1]))
+    )
+      entryEnd--;
+    replaceRange(lines, existing.index, entryEnd, [
       `${existing.indent}${quoteKey(key)}: ${scalar}${eol}`,
     ]);
   } else {

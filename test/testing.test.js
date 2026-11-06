@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse } from "../src/parser.js";
 import { parseConfig, DEFAULT_TESTS } from "../src/config.js";
@@ -467,5 +467,163 @@ test("fx test exit codes cover passing, failing, empty and invalid runs", () => 
   } finally {
     for (const dir of [passing, failing, empty])
       fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("expect remains assignable and callable", () => {
+  const body = parse(
+    'test "names" { let expect = 0; expect = 5; expect += 1; expect(2); expect true; }',
+  ).tests[0].body;
+  assert.equal(body[1].type, "Assign");
+  assert.equal(body[1].op, "=");
+  assert.equal(body[2].type, "Assign");
+  assert.equal(body[2].op, "+=");
+  assert.equal(body[3].type, "BlockCall");
+  assert.equal(body[4].type, "Expect");
+});
+
+test("disabling tests preserves comments before the next key", () => {
+  const dir = tmpProject();
+  try {
+    const configPath = path.join(dir, "fx.yml");
+    fs.writeFileSync(
+      configPath,
+      "fx:\n  tests:\n    timeout: 500\n    # indented trailing comment\n  # next setting\n  partialSprites: false\n",
+    );
+    disableFeature({ configPath, configDir: dir, name: "tests" });
+    assert.equal(
+      fs.readFileSync(configPath, "utf8"),
+      "fx:\n  tests: false\n    # indented trailing comment\n  # next setting\n  partialSprites: false\n",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fx test preserves disabled configuration exit code and hint", () => {
+  const dir = tmpProject({ tests: "false" });
+  try {
+    const result = run(["test"], dir);
+    assert.equal(result.status, TEST_EXIT.ERROR, result.stderr);
+    assert.match(result.stdout + result.stderr, /fx feature tests enable/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fx check excludes configured test patterns and preserves explicit files", () => {
+  const dir = tmpProject({
+    tests: '\n    pattern: "specs/**/*.tfx"',
+    testSource: null,
+  });
+  try {
+    fs.mkdirSync(path.join(dir, "specs"));
+    fs.writeFileSync(
+      path.join(dir, "specs", "custom.tfx"),
+      'test "custom" { expect true; }',
+    );
+    const checked = run(["check"], dir);
+    assert.equal(checked.status, 0, checked.stderr);
+    assert.match(checked.stdout, /Checked 1 file/);
+    assert.notEqual(run(["check", "specs/custom.tfx"], dir).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reset keeps list snapshots independent of later mutations", async () => {
+  const dir = tmpProject({
+    source:
+      'sprite "Player" { list items = ["a"]; function addItem() { items.push("b"); } }',
+    testSource:
+      'test "reset list" { reset(); addItem(); expect state.list("items").length == 2; reset(); expect state.list("items").length == 1; }',
+  });
+  try {
+    const result = await runTests({ dir });
+    assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returning helpers share state and isolate parameters and locals", async () => {
+  const dir = tmpProject({
+    testSource: `
+    let shared = 0;
+    let value = 7;
+    returning function advance(value) {
+      let local = 10;
+      shared += 1;
+      step(value);
+      return local;
+    }
+    returning function restart() { reset(); return 1; }
+    test "helper state" {
+      expect advance(3) == 10;
+      expect state.ticks() == 3;
+      expect shared == 1;
+      expect value == 7;
+      expect advance(2) == 10;
+      expect state.ticks() == 5;
+      expect restart() == 1;
+      expect state.ticks() == 0;
+    }
+  `,
+  });
+  try {
+    const result = await runTests({ dir });
+    assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("simulated ticks advance project timers and waits", async () => {
+  const dir = tmpProject({
+    source: `sprite "Player" {
+      let elapsed = 0;
+      when greenFlag { control.wait(1); elapsed = sensing.timer(); }
+    }`,
+    testSource:
+      'test "clock" { start(); step(40); expect state.variable("elapsed") >= 1; expect state.variable("elapsed") < 1.4; }',
+  });
+  try {
+    const result = await runTests({ dir, ticksPerSecond: 30 });
+    assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("watch exits on SIGINT while waiting without a file change", async () => {
+  const dir = tmpProject();
+  const child = spawn(process.execPath, [bin, "test", "--watch"], {
+    cwd: dir,
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  try {
+    const result = await new Promise((resolve, reject) => {
+      let output = "";
+      const timeout = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error("watch did not exit: " + output));
+      }, 15000);
+      child.stdout.on("data", (chunk) => {
+        output += chunk;
+        if (output.includes("Watching for changes")) child.kill("SIGINT");
+      });
+      child.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.once("exit", (code, signal) => {
+        clearTimeout(timeout);
+        resolve({ code, signal });
+      });
+    });
+    assert.deepEqual(result, { code: TEST_EXIT.INTERRUPTED, signal: null });
+  } finally {
+    child.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -156,7 +156,8 @@ function restoreVm(vm, snapshot) {
     const target = vm.runtime.getTargetById(saved.id);
     if (!target) continue;
     for (const [id, value] of Object.entries(saved.variables)) {
-      if (target.variables?.[id]) target.variables[id].value = value;
+      if (target.variables?.[id])
+        target.variables[id].value = Array.isArray(value) ? [...value] : value;
     }
     target.x = saved.x;
     target.y = saved.y;
@@ -177,7 +178,7 @@ function createScope({ vm, config, seed, capture, deadline, warnings }) {
     capture,
     deadline,
     warnings,
-    ticks: 0,
+    progress: { ticks: 0 },
     vars: new Map(),
     functions: new Map(),
     broadcasts: new Set(),
@@ -190,6 +191,8 @@ function checkDeadline(scope) {
 }
 
 function childScope(scope) {
+  // Copy bindings while sharing their cells; declarations and parameters get
+  // new cells, while assignments to existing test variables reach the caller.
   return { ...scope, vars: new Map(scope.vars) };
 }
 
@@ -202,7 +205,7 @@ function evaluate(node, scope) {
     case "ArrayLiteral":
       return node.items.map((item) => evaluate(item, scope));
     case "Identifier": {
-      if (scope.vars.has(node.name)) return scope.vars.get(node.name);
+      if (scope.vars.has(node.name)) return scope.vars.get(node.name).value;
       throw new TestError(
         `Unknown name ${JSON.stringify(node.name)} in test expression`,
         { diagnostics: [locOf(node)] },
@@ -298,10 +301,9 @@ function evaluateCall(node, scope) {
   if (!fn) return callProjectProcedure(node, scope);
   const local = childScope(scope);
   fn.params.forEach((param, index) => {
-    local.vars.set(
-      param.name,
-      node.args[index] ? evaluate(node.args[index], scope) : 0,
-    );
+    local.vars.set(param.name, {
+      value: node.args[index] ? evaluate(node.args[index], scope) : 0,
+    });
   });
   try {
     executeStatements(fn.body, local);
@@ -483,8 +485,8 @@ function callProjectProcedure(node, scope) {
     );
 
   const values = node.args.map((arg) => evaluate(arg, scope));
-  scope.procedureCalls = (scope.procedureCalls ?? 0) + 1;
-  const stamp = `${String(target.id ?? "target").replace(/[^A-Za-z0-9_]/g, "_")}_fxtest${scope.procedureCalls}_${scope.ticks}`;
+  scope.progress.procedureCalls = (scope.progress.procedureCalls ?? 0) + 1;
+  const stamp = `${String(target.id ?? "target").replace(/[^A-Za-z0-9_]/g, "_")}_fxtest${scope.progress.procedureCalls}_${scope.progress.ticks}`;
   const callId = `${stamp}_call`;
   const synthetic = [callId];
   const inputs = {};
@@ -519,7 +521,7 @@ function callProjectProcedure(node, scope) {
   let varId = null;
   if (procedure.returns) {
     varId = `${stamp}_var`;
-    const varName = `__fxTestReturn${scope.procedureCalls}`;
+    const varName = `__fxTestReturn${scope.progress.procedureCalls}`;
     target.variables[varId] = {
       id: varId,
       name: varName,
@@ -645,7 +647,7 @@ function stateQuery(segments, node, scope) {
     case "errors":
       return [...scope.capture.errors];
     case "ticks":
-      return scope.ticks;
+      return scope.progress.ticks;
     default:
       throw new TestError(`Unknown state query state.${segments.join(".")}`, {
         diagnostics: [locOf(node)],
@@ -663,7 +665,9 @@ function executeStatements(statements, scope) {
 function executeStatement(node, scope) {
   switch (node.type) {
     case "VarDecl":
-      scope.vars.set(node.name, node.init ? evaluate(node.init, scope) : 0);
+      scope.vars.set(node.name, {
+        value: node.init ? evaluate(node.init, scope) : 0,
+      });
       return;
     case "FunctionDecl":
       scope.functions.set(node.name, node);
@@ -674,7 +678,7 @@ function executeStatement(node, scope) {
           `Unknown variable ${JSON.stringify(node.name)} in test`,
           { diagnostics: [locOf(node)] },
         );
-      const previous = scope.vars.get(node.name);
+      const previous = scope.vars.get(node.name).value;
       const value = evaluate(node.value, scope);
       const next =
         node.op === "="
@@ -688,7 +692,7 @@ function executeStatement(node, scope) {
               : node.op === "*="
                 ? Number(previous) * Number(value)
                 : Number(previous) / Number(value);
-      scope.vars.set(node.name, next);
+      scope.vars.get(node.name).value = next;
       return;
     }
     case "If":
@@ -764,12 +768,13 @@ function stepTicks(scope, count) {
   for (let index = 0; index < count; index += 1) {
     checkDeadline(scope);
     try {
+      scope.vm.runtime.currentMSecs += 1000 / scope.config.ticksPerSecond;
       scope.vm.runtime._step();
     } catch (error) {
       scope.capture.errors.push(error?.message ?? String(error));
       if (scope.config.failOnRuntimeError) throw error;
     }
-    scope.ticks += 1;
+    scope.progress.ticks += 1;
   }
 }
 
@@ -781,7 +786,7 @@ function executeAction(node, scope) {
   switch (name) {
     case "reset": {
       restoreVm(vm, scope.initial);
-      scope.ticks = 0;
+      scope.progress.ticks = 0;
       scope.broadcasts.clear();
       scope.capture.errors.length = 0;
       return;
@@ -861,6 +866,8 @@ async function runOneTest({ test, helpers, sb3, config, seed }) {
   const started = performance.now();
   const vm = await loadProject(sb3);
   vm.runtime.currentStepTime = 1000 / config.ticksPerSecond;
+  // The sequencer refreshes this clock each frame; keep it on simulated time.
+  vm.runtime.updateCurrentMSecs = () => {};
 
   const capture = { errors: [], warnings: [] };
   const originalError = console.error;
@@ -935,7 +942,7 @@ async function runOneTest({ test, helpers, sb3, config, seed }) {
     name: test.name,
     status,
     durationMs: Math.round(performance.now() - started),
-    ticks: scope.ticks,
+    ticks: scope.progress.ticks,
     seed,
     error: failure,
   };

@@ -7,7 +7,7 @@
  * requires the VM lazily. Loading a project never draws anything, so the
  * no-op renderer is enough to deserialize targets, costumes, and blocks.
  *
- * The VM is shipped as a development dependency: `fx test` reports a clear
+ * The VM is shipped as a runtime dependency: `fx test` reports a clear
  * error when it is not installed instead of failing at import time.
  */
 import crypto from "node:crypto";
@@ -67,8 +67,8 @@ export function loadVmModules() {
     centralDispatch = require("scratch-vm/src/dispatch/central-dispatch");
   } catch (error) {
     throw new Error(
-      "Running tests needs the PenguinMod VM, which is not installed. " +
-        "Install dependencies with `npm install` and try again.",
+      "Running tests needs the PenguinMod VM, which could not be loaded. " +
+        "Reinstall @triflare/fx with its runtime dependencies and try again.",
       { cause: error },
     );
   }

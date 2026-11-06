@@ -235,9 +235,12 @@ class Parser {
         case "when":
           return this.parseHat();
         case "expect":
-          // `expect(...)` stays a normal call; the assertion form is the
+          // Calls and assignments stay normal statements; the assertion form is the
           // bare `expect <expression>;` statement.
-          if (!(this.peek(1).type === "punct" && this.peek(1).value === "("))
+          if (!(
+            this.peek(1).type === "punct" &&
+            (this.peek(1).value === "(" || ASSIGN_OPS.has(this.peek(1).value))
+          ))
             return this.parseExpect();
           break;
         case "if":
