@@ -70,7 +70,14 @@ function configure(command, spec) {
   if (spec.group) command.helpGroup(spec.group);
   for (const argument of spec.arguments ?? []) command.argument(argument);
   for (const option of spec.options ?? []) {
-    if (option.defaultValue === undefined)
+    if (option.parser)
+      command.option(
+        option.flags,
+        option.description,
+        option.parser,
+        option.defaultValue,
+      );
+    else if (option.defaultValue === undefined)
       command.option(option.flags, option.description);
     else command.option(option.flags, option.description, option.defaultValue);
   }

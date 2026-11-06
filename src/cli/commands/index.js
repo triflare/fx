@@ -7,6 +7,7 @@ import { devCommand } from "./dev.js";
 import { registerExtension } from "./extension.js";
 import { fmtCommand } from "./fmt.js";
 import { initCommand } from "./init.js";
+import { lintCommand } from "./lint.js";
 import { packageCommand } from "./package.js";
 import { registerSprite } from "./sprite/index.js";
 import { registerVendor } from "./vendor/index.js";
@@ -18,6 +19,7 @@ const TOP_LEVEL = [
   packageCommand,
   decompileCommand,
   checkCommand,
+  lintCommand,
   fmtCommand,
   catalogCommand,
   initCommand,

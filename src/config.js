@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { configFilename, configFilenames, productName } from "./brand.js";
+import { DEFAULT_LINT, normalizeLintConfig } from "./lint/config.js";
 
 export const DEFAULT_PROJECT = {
   name: `${productName()} Project`,
@@ -32,6 +33,7 @@ export const DEFAULT_PROJECT = {
 export const DEFAULT_FX = {
   partialSprites: false,
   vendorDir: "extensions",
+  lint: { ...DEFAULT_LINT, rules: { ...DEFAULT_LINT.rules } },
 };
 
 /** Default directory that receives vendored extension sources. */
@@ -381,7 +383,7 @@ export function normalizeProject(raw = {}) {
  * @returns {typeof DEFAULT_FX}
  */
 export function normalizeFx(raw = {}) {
-  const fx = { ...DEFAULT_FX };
+  const fx = { ...DEFAULT_FX, lint: { ...DEFAULT_LINT, rules: {} } };
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     if (raw.partialSprites != null)
       fx.partialSprites = Boolean(raw.partialSprites);
@@ -390,6 +392,10 @@ export function normalizeFx(raw = {}) {
         throw new Error(`${configFilename()}: fx.vendorDir must be a path`);
       fx.vendorDir = raw.vendorDir.trim();
     }
+    fx.lint = normalizeLintConfig(
+      raw.lint,
+      (message) => new Error(`${configFilename()}: ${message}`),
+    );
   }
   return fx;
 }

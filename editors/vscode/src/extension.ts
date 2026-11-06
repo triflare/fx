@@ -1,7 +1,17 @@
 import * as vscode from "vscode";
 import { CATALOG, LIST_OPS, blockNames } from "../../../src/catalog.js";
 import { FxError } from "../../../src/errors.js";
-import { parse } from "../../../src/parser.js";
+import {
+  FxQuickFixProvider,
+  beginLintRun,
+  invalidateDocument,
+  isInProject,
+  isProjectConfig,
+  lintDocument,
+  projectConfigFor,
+  publishDiagnostics,
+  publishFailure,
+} from "./lint";
 
 const LANGUAGE_ID = "fx";
 const DEBOUNCE_MS = 300;
@@ -168,20 +178,24 @@ class FxCompletionProvider implements vscode.CompletionItemProvider {
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Parse the document and publish any lexical/syntax error as a diagnostic.
- * `parse` runs the lexer first, so LexErrors surface the same way.
+ * Lint the document's project and publish the resulting diagnostics for every
+ * open source in it. Syntax errors arrive as FX000, so they surface the same
+ * way as every other rule.
  */
-function refreshDiagnostics(
+async function refreshDiagnostics(
   document: vscode.TextDocument,
   collection: vscode.DiagnosticCollection,
-): void {
+): Promise<void> {
   if (document.languageId !== LANGUAGE_ID) return;
 
+  const runId = beginLintRun();
   try {
-    parse(document.getText(), document.uri.toString());
-    collection.delete(document.uri);
+    const project = await lintDocument(document);
+    publishDiagnostics(collection, project, runId);
   } catch (error) {
-    collection.set(document.uri, [toDiagnostic(error, document)]);
+    publishFailure(collection, document, runId, () =>
+      toDiagnostic(error, document),
+    );
   }
 }
 
@@ -228,9 +242,28 @@ export function activate(context: vscode.ExtensionContext): void {
       key,
       setTimeout(() => {
         debounceTimers.delete(key);
-        refreshDiagnostics(document, collection);
+        void refreshDiagnostics(document, collection);
       }, DEBOUNCE_MS),
     );
+  };
+
+  /**
+   * Re-lint the project that held `uri`, driven by a source that is still open
+   * in it: one run publishes diagnostics for every open document in the
+   * project. A source without a project is linted on its own, so losing it
+   * cannot change what any other open source reports.
+   */
+  const refreshProjectOf = async (uri: vscode.Uri): Promise<void> => {
+    const configUri = await projectConfigFor(uri);
+    if (!configUri) return;
+    const key = uri.toString();
+    const projectDocument = vscode.workspace.textDocuments.find(
+      (open) =>
+        open.languageId === LANGUAGE_ID &&
+        open.uri.toString() !== key &&
+        isInProject(open, configUri),
+    );
+    if (projectDocument) await refreshDiagnostics(projectDocument, collection);
   };
 
   context.subscriptions.push(
@@ -239,24 +272,49 @@ export function activate(context: vscode.ExtensionContext): void {
       new FxCompletionProvider(),
       ".", // trigger category/list-method completion after the dot
     ),
-    vscode.workspace.onDidOpenTextDocument((document) =>
-      refreshDiagnostics(document, collection),
+    vscode.languages.registerCodeActionsProvider(
+      { language: LANGUAGE_ID },
+      new FxQuickFixProvider(),
+      { providedCodeActionKinds: FxQuickFixProvider.providedCodeActionKinds },
     ),
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      void refreshDiagnostics(document, collection);
+    }),
     vscode.workspace.onDidChangeTextDocument((event) =>
       schedule(event.document),
     ),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (document.languageId === LANGUAGE_ID) {
+        void refreshDiagnostics(document, collection);
+        return;
+      }
+      if (!isProjectConfig(document.uri)) return;
+      // Re-run through any open source in the config's project; one run
+      // publishes diagnostics for every open document in it.
+      const projectDocument = vscode.workspace.textDocuments.find(
+        (open) =>
+          open.languageId === LANGUAGE_ID && isInProject(open, document.uri),
+      );
+      if (projectDocument) void refreshDiagnostics(projectDocument, collection);
+    }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       const key = document.uri.toString();
       const pending = debounceTimers.get(key);
       if (pending) clearTimeout(pending);
       debounceTimers.delete(key);
+      invalidateDocument(document.uri);
       collection.delete(document.uri);
+      // The closed source no longer contributes its declarations to the merged
+      // program, so the project's remaining open sources may be stale.
+      if (document.languageId === LANGUAGE_ID) {
+        void refreshProjectOf(document.uri);
+      }
     }),
   );
 
   // Pick up documents that were already open when the extension activated.
   for (const document of vscode.workspace.textDocuments) {
-    refreshDiagnostics(document, collection);
+    void refreshDiagnostics(document, collection);
   }
 }
 
