@@ -174,6 +174,12 @@ class Parser {
             return this.parseVarDecl(true);
           }
           break;
+        case "thread":
+        case "runtime":
+          if (this.peek(1).type === "ident" && this.peek(1).value === "let") {
+            return this.parseTempVarDecl(tok.value);
+          }
+          break;
         case "list":
           if (this.peek(1).type === "ident") {
             return this.parseListDecl();
@@ -235,6 +241,16 @@ class Parser {
     if (this.eat("=")) init = this.parseExpression();
     this.expect(";");
     return { type: "VarDecl", name, init, cloud, loc: tok };
+  }
+
+  parseTempVarDecl(kind) {
+    const tok = this.next();
+    this.expect("let");
+    const name = this.expectIdent();
+    let init = null;
+    if (this.eat("=")) init = this.parseExpression();
+    this.expect(";");
+    return { type: "TempVarDecl", kind, name, init, loc: tok };
   }
 
   parseListDecl() {

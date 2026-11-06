@@ -610,6 +610,109 @@ const CORE_CATALOG = {
     kind: "boolean",
     fields: { VALUE: ["is penguinmod?", null] },
   },
+
+  // ------------------------------------------------- temporary variables
+  // The Fx fork of Temporary Variables (`fxTempVars`). Entries are marked
+  // `requiresExtension` so the compiler can refuse to emit blocks whose
+  // extension is not loaded, and so the linter can point at the feature.
+  "tempvars.setThread": {
+    opcode: "fxTempVars_setThreadVariable",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: {
+      VAR: { type: "string", default: "variable" },
+      STRING: { type: "string", default: "0" },
+    },
+  },
+  "tempvars.changeThread": {
+    opcode: "fxTempVars_changeThreadVariable",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: {
+      VAR: { type: "string", default: "variable" },
+      NUM: { type: "number", default: "1" },
+    },
+  },
+  "tempvars.thread": {
+    opcode: "fxTempVars_getThreadVariable",
+    kind: "reporter",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: { VAR: { type: "string", default: "variable" } },
+  },
+  "tempvars.threadExists": {
+    opcode: "fxTempVars_threadVariableExists",
+    kind: "boolean",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: { VAR: { type: "string", default: "variable" } },
+  },
+  "tempvars.forEachThread": {
+    opcode: "fxTempVars_forEachThreadVariable",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: {
+      VAR: { type: "string", default: "thread variable" },
+      NUM: { type: "number", default: "10" },
+      SUBSTACK: SUBSTACK,
+    },
+  },
+  "tempvars.threads": {
+    opcode: "fxTempVars_listThreadVariables",
+    kind: "reporter",
+    extension: "fxTempVars",
+    requiresExtension: true,
+  },
+  "tempvars.setRuntime": {
+    opcode: "fxTempVars_setRuntimeVariable",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: {
+      VAR: { type: "string", default: "variable" },
+      STRING: { type: "string", default: "0" },
+    },
+  },
+  "tempvars.changeRuntime": {
+    opcode: "fxTempVars_changeRuntimeVariable",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: {
+      VAR: { type: "string", default: "variable" },
+      // Upstream declares NUM as a string input; keep it so block JSON matches.
+      NUM: { type: "string", default: "1" },
+    },
+  },
+  "tempvars.runtime": {
+    opcode: "fxTempVars_getRuntimeVariable",
+    kind: "reporter",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: { VAR: { type: "string", default: "variable" } },
+  },
+  "tempvars.runtimeExists": {
+    opcode: "fxTempVars_runtimeVariableExists",
+    kind: "boolean",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: { VAR: { type: "string", default: "variable" } },
+  },
+  "tempvars.deleteRuntime": {
+    opcode: "fxTempVars_deleteRuntimeVariable",
+    extension: "fxTempVars",
+    requiresExtension: true,
+    inputs: { VAR: { type: "string", default: "variable" } },
+  },
+  "tempvars.deleteAllRuntime": {
+    opcode: "fxTempVars_deleteAllRuntimeVariables",
+    extension: "fxTempVars",
+    requiresExtension: true,
+  },
+  "tempvars.runtimes": {
+    opcode: "fxTempVars_listRuntimeVariables",
+    kind: "reporter",
+    extension: "fxTempVars",
+    requiresExtension: true,
+  },
 };
 
 /**

@@ -137,6 +137,7 @@ export class Compiler {
     this.loadAsset = loadAsset || null;
     this.catalog = catalog ? { ...CATALOG, ...catalog } : CATALOG;
     this.extensionUrls = extensionUrls;
+    this.requiredExtensions = new Map();
     this.file = file;
     /** @type {string[]} Non-fatal problems worth surfacing to the user. */
     this.warnings = [];
@@ -252,6 +253,8 @@ export class Compiler {
     // can only be given their mutation once every stack is complete.
     for (const ctx of contexts) this.applyDynamicNextMutations(ctx);
 
+    this.validateRequiredExtensions();
+
     return { project: this.assembleProject(contexts), assets: this.assets };
   }
 
@@ -335,6 +338,11 @@ export class Compiler {
   }
 
   declareTargetVar(ctx, decl) {
+    if (decl.name.startsWith("$"))
+      this.fail(
+        `Names starting with "$" are reserved for temporary variables; rename ${JSON.stringify(decl.name)}.`,
+        decl.loc,
+      );
     const global = ctx.isStage;
     if (global && this.globals.has(decl.name)) {
       const first = this.globals.get(decl.name);
@@ -380,6 +388,11 @@ export class Compiler {
   }
 
   declareTargetList(ctx, decl) {
+    if (decl.name.startsWith("$"))
+      this.fail(
+        `Names starting with "$" are reserved for temporary variables; rename ${JSON.stringify(decl.name)}.`,
+        decl.loc,
+      );
     if (ctx.isStage && this.globals.has(decl.name)) {
       const first = this.globals.get(decl.name);
       const where = this.where(first.loc);
@@ -420,6 +433,13 @@ export class Compiler {
           (where ? ` (already declared in ${where})` : ""),
         decl.loc,
       );
+    }
+    for (const param of decl.params) {
+      if (param.name.startsWith("$"))
+        this.fail(
+          `Names starting with "$" are reserved for temporary variables; rename parameter ${JSON.stringify(param.name)}.`,
+          decl.loc,
+        );
     }
     const argIds = decl.params.map((_, i) => `arg${i}`);
     const proccode = decl.params.length
@@ -785,6 +805,8 @@ export class Compiler {
         return this.compileForever(ctx, node);
       case "Return":
         return this.compileReturn(ctx, node);
+      case "TempVarDecl":
+        return this.compileTempVarDecl(ctx, node);
       default:
         this.fail(`Unsupported statement ${node.type}`, node.loc);
     }
@@ -824,6 +846,13 @@ export class Compiler {
   }
 
   compileAssign(ctx, node) {
+    const sigil = /^(\$\$?)([A-Za-z_][A-Za-z0-9_]*)$/.exec(node.name);
+    if (sigil) return this.compileSigilAssign(ctx, node, sigil);
+    if (node.name.startsWith("$"))
+      this.fail(
+        `Invalid temporary variable reference ${JSON.stringify(node.name)}`,
+        node.loc,
+      );
     const resolved = ctx.resolveValue(node.name);
     if (!resolved || resolved.kind !== "var") {
       this.fail(`Unknown variable ${JSON.stringify(node.name)}`, node.loc);
@@ -878,6 +907,64 @@ export class Compiler {
     );
     ctx.target.blocks[id].inputs.VALUE = [3, operatorId, [10, ""]];
     return id;
+  }
+
+  compileTempVarDecl(ctx, node) {
+    if (node.name.startsWith("$"))
+      this.fail(
+        'Temporary variable names cannot start with "$"; use a plain name.',
+        node.loc,
+      );
+    const name =
+      node.kind === "runtime" ? "tempvars.setRuntime" : "tempvars.setThread";
+    const entry = this.catalog[name];
+    if (!entry)
+      this.fail(
+        "Temporary variables are not available in this Fx build",
+        node.loc,
+      );
+    return this.emitCatalogCall(
+      ctx,
+      {
+        name,
+        segments: name.split("."),
+        args: [
+          { type: "String", value: node.name, loc: node.loc },
+          node.init ?? { type: "String", value: "0", loc: node.loc },
+        ],
+        loc: node.loc,
+      },
+      entry,
+      null,
+    ).id;
+  }
+
+  compileSigilAssign(ctx, node, sigil) {
+    if (node.op !== "=" && node.op !== "+=")
+      this.fail(
+        `Temporary variables only support "=" and "+="; ${JSON.stringify(node.op)} is not available.`,
+        node.loc,
+      );
+    const kind = sigil[1] === "$$" ? "Runtime" : "Thread";
+    const action = node.op === "=" ? "set" : "change";
+    const name = `tempvars.${action}${kind}`;
+    const entry = this.catalog[name];
+    if (!entry)
+      this.fail(
+        "Temporary variables are not available in this Fx build",
+        node.loc,
+      );
+    return this.emitCatalogCall(
+      ctx,
+      {
+        name,
+        segments: name.split("."),
+        args: [{ type: "String", value: sigil[2], loc: node.loc }, node.value],
+        loc: node.loc,
+      },
+      entry,
+      null,
+    ).id;
   }
 
   compileIf(ctx, node) {
@@ -976,6 +1063,11 @@ export class Compiler {
   emitCatalogCall(ctx, node, entry, parentId) {
     if (entry.kind === "hat")
       this.fail(`${node.name} is an event and cannot be called`, node.loc);
+    if (entry.requiresExtension) {
+      const id = entry.extension || extensionForOpcode(entry.opcode);
+      if (id && !this.requiredExtensions.has(id))
+        this.requiredExtensions.set(id, node.loc);
+    }
     const id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
     const fieldNames = Object.keys(entry.fields || {});
     const inputNames = Object.keys(entry.inputs || {});
@@ -1282,6 +1374,33 @@ export class Compiler {
   }
 
   emitIdentifier(ctx, node) {
+    const sigil = /^(\$\$?)([A-Za-z_][A-Za-z0-9_]*)$/.exec(node.name);
+    if (sigil) {
+      const name = sigil[1] === "$$" ? "tempvars.runtime" : "tempvars.thread";
+      const entry = this.catalog[name];
+      if (!entry)
+        this.fail(
+          "Temporary variables are not available in this Fx build",
+          node.loc,
+        );
+      const result = this.emitCatalogCall(
+        ctx,
+        {
+          name,
+          segments: name.split("."),
+          args: [{ type: "String", value: sigil[2], loc: node.loc }],
+          loc: node.loc,
+        },
+        entry,
+        null,
+      );
+      return { k: "block", id: result.id, kind: "reporter" };
+    }
+    if (node.name.startsWith("$"))
+      this.fail(
+        `Invalid temporary variable reference ${JSON.stringify(node.name)}`,
+        node.loc,
+      );
     if (node.segments.length > 1)
       this.fail(
         `Unexpected dotted name ${JSON.stringify(node.name)}`,
@@ -1536,6 +1655,20 @@ export class Compiler {
   }
 
   // ------------------------------------------------------------ assembly
+
+  validateRequiredExtensions() {
+    for (const [id, loc] of this.requiredExtensions) {
+      if (this.extensionUrls[id]) continue;
+      const feature = id === "fxTempVars" ? "temporaryvariables" : null;
+      const hint = feature
+        ? ` Run "fx feature ${feature} enable" to install it.`
+        : "";
+      this.fail(
+        `This project uses blocks from extension ${JSON.stringify(id)}, which is not loaded.${hint}`,
+        loc,
+      );
+    }
+  }
 
   assembleProject(contexts) {
     const targets = [];

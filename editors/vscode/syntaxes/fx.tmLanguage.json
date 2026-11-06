@@ -7,6 +7,7 @@
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#block-calls" },
+    { "include": "#temp-vars" },
     { "include": "#hat-events" },
     { "include": "#property-keys" },
     { "include": "#keywords" },
@@ -63,12 +64,20 @@
     "block-calls": {
       "patterns": [
         {
-          "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm)(\\.)([A-Za-z_$][\\w$]*)",
+          "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm|tempvars)(\\.)([A-Za-z_$][\\w$]*)",
           "captures": {
             "1": { "name": "support.module.fx" },
             "2": { "name": "punctuation.accessor.fx" },
             "3": { "name": "support.function.fx" }
           }
+        }
+      ]
+    },
+    "temp-vars": {
+      "patterns": [
+        {
+          "match": "\\$\\$?[A-Za-z_][\\w$]*",
+          "name": "variable.other.temp.fx"
         }
       ]
     },
@@ -105,6 +114,10 @@
         {
           "match": "\\b(let|cloud|list|function|returning|warp)\\b",
           "name": "keyword.other.declaration.fx"
+        },
+        {
+          "match": "\\b(thread|runtime)\\b(?=\\s+let\\b)",
+          "name": "keyword.other.temporary.fx"
         },
         {
           "match": "\\b(when|if|else|repeat|while|forever|return)\\b",

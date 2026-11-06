@@ -615,3 +615,122 @@ export function removeVendorEntry(configPath, name) {
   writeDocument(configPath, lines.join(""));
   return { removed: source ?? key };
 }
+
+// -------------------------------------------------------------- feature edits
+
+/**
+ * Add or replace a `features:` entry without reformatting the rest of fx.yml.
+ *
+ * @param {string} configPath
+ * @param {string} name
+ * @param {string} file
+ * @returns {{added: boolean, updated: boolean}}
+ */
+export function addFeatureEntry(configPath, name, file) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const key = String(name);
+  let added = false;
+  let updated = false;
+  const entryLine = (indent) =>
+    `${indent}${quoteKey(key)}: ${quote(file)}${eol}`;
+
+  const bounds = topLevelBounds(lines, "features");
+  if (!bounds) {
+    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n"))
+      lines[lines.length - 1] += eol;
+    lines.push(`features:${eol}`, entryLine("  "));
+    added = true;
+  } else if (bounds.inline) {
+    const mapping = parseValue(bounds.inline) || {};
+    updated = Object.hasOwn(mapping, key);
+    added = !updated;
+    mapping[key] = file;
+    const dumped = yaml
+      .dump({ features: mapping }, { lineWidth: -1, noRefs: true })
+      .split("\n")
+      .filter((line, index, all) => !(index === all.length - 1 && line === ""))
+      .map((line) => `${line}${eol}`);
+    if (bounds.comment) dumped[0] = `features: ${bounds.comment}${eol}`;
+    replaceRange(lines, bounds.index, bounds.index + 1, dumped);
+  } else {
+    const spans = mappingEntrySpans(lines, bounds.index, bounds.end);
+    const existing = spans.find((span) => span.key === key);
+    if (existing) {
+      replaceRange(lines, existing.index, existing.end, [
+        entryLine(existing.indent),
+      ]);
+      updated = true;
+    } else {
+      const indent = childIndent(lines, bounds.index, bounds.end);
+      insertAt(lines, bounds.end, [entryLine(indent)], eol);
+      added = true;
+    }
+  }
+
+  if (added || updated) writeDocument(configPath, lines.join(""));
+  return { added, updated };
+}
+
+/**
+ * Remove a `features:` entry.
+ * @param {string} configPath
+ * @param {string} name
+ * @returns {{removed: string|null}}
+ */
+export function removeFeatureEntry(configPath, name) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const key = String(name);
+  const bounds = topLevelBounds(lines, "features");
+  if (!bounds) return { removed: null };
+
+  if (bounds.inline) {
+    const mapping = parseValue(bounds.inline);
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
+      return { removed: null };
+    if (!Object.hasOwn(mapping, key)) return { removed: null };
+    const source = mapping[key];
+    delete mapping[key];
+    const rest = Object.keys(mapping).length
+      ? ` ${JSON.stringify(mapping)}`
+      : " {}";
+    const comment = bounds.comment ? ` ${bounds.comment}` : "";
+    const line = lines[bounds.index];
+    lines[bounds.index] = `features:${rest}${comment}${
+      /\r?\n$/.test(line) ? ending(line) : eol
+    }`;
+    writeDocument(configPath, lines.join(""));
+    return { removed: source == null ? null : String(source) };
+  }
+
+  const spans = mappingEntrySpans(lines, bounds.index, bounds.end);
+  const existing = spans.find((span) => span.key === key);
+  if (!existing) return { removed: null };
+
+  let source = null;
+  try {
+    const parsed = yaml.load(
+      [
+        content(lines[bounds.index]),
+        ...lines.slice(existing.index, existing.end),
+      ].join("\n"),
+    );
+    const entry = parsed?.features?.[key];
+    source =
+      typeof entry === "string" ? entry : (entry?.file ?? entry?.path ?? null);
+  } catch {
+    // The entry is removed either way.
+  }
+
+  replaceRange(lines, existing.index, existing.end, []);
+  const end = bounds.end - (existing.end - existing.index);
+  const remaining = mappingEntrySpans(lines, bounds.index, end);
+  if (remaining.length === 0) {
+    replaceRange(lines, bounds.index, end, [`features: {}${eol}`]);
+  }
+  writeDocument(configPath, lines.join(""));
+  return { removed: source ?? key };
+}

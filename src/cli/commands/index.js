@@ -5,6 +5,7 @@ import { checkCommand } from "./check.js";
 import { decompileCommand } from "./decompile.js";
 import { devCommand } from "./dev.js";
 import { registerExtension } from "./extension.js";
+import { featureCommand } from "./feature.js";
 import { fmtCommand } from "./fmt.js";
 import { initCommand } from "./init.js";
 import { lintCommand } from "./lint.js";
@@ -22,6 +23,7 @@ const TOP_LEVEL = [
   lintCommand,
   fmtCommand,
   catalogCommand,
+  featureCommand,
   initCommand,
   completionCommand,
 ];

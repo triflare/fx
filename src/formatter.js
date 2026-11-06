@@ -321,6 +321,12 @@ class Formatter {
             `${node.init ? ` = ${renderExpression(node.init)}` : ""};`,
         );
         return;
+      case "TempVarDecl":
+        this.out.push(
+          `${pad}${node.kind} let ${node.name}` +
+            `${node.init ? ` = ${renderExpression(node.init)}` : ""};`,
+        );
+        return;
       case "ListDecl":
         this.out.push(
           `${pad}list ${node.name} = [${node.items

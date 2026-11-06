@@ -11,6 +11,7 @@ import path from "node:path";
 import { configFilename, outputDirectory, sourceExtension } from "../brand.js";
 import { loadConfigFrom, parseConfig } from "../config.js";
 import { loadExtensions } from "../extensions.js";
+import { loadFeatureExtensions } from "../features.js";
 import { loadVendorExtensions, migrateProjectExtensions } from "../vendor.js";
 import { UsageError } from "./errors.js";
 
@@ -49,6 +50,7 @@ export function loadProjectConfig({ cwd = process.cwd(), searchDir, options }) {
       fx: null,
       package: null,
       vendor: [],
+      features: [],
       vendorDir: "extensions",
       path: null,
     };
@@ -164,6 +166,17 @@ export async function loadProjectExtensions({ configDir, loaded, reporter }) {
     for (const name of vendored.unnecessaryUnsandboxed || [])
       unnecessaryUnsandboxed.add(name);
     for (const warning of vendored.warnings) reporter.warn(warning);
+  }
+
+  if (loaded?.features && loaded.features.length > 0) {
+    const featureExtensions = await loadFeatureExtensions({
+      configDir,
+      config: loaded,
+    });
+    Object.assign(catalog, featureExtensions.catalog);
+    Object.assign(extensionUrls, featureExtensions.extensionUrls);
+    unsandboxed.push(...featureExtensions.unsandboxed);
+    for (const warning of featureExtensions.warnings) reporter.warn(warning);
   }
 
   if (config.extensions && config.extensions.length > 0) {

@@ -283,6 +283,8 @@ function baseName(file) {
 
 // ----------------------------------------------------------------- analyzer
 
+const TEMP_SIGIL = /^\$\$?[A-Za-z_][A-Za-z0-9_]*$/;
+
 class Analyzer {
   /**
    * @param {{
@@ -368,6 +370,7 @@ class Analyzer {
   }
 
   checkIdentifier(expr, state) {
+    if (TEMP_SIGIL.test(expr.name)) return;
     if (expr.segments.length > 1) {
       this.report(
         "FX201",
@@ -421,7 +424,21 @@ class Analyzer {
     }
 
     const entry = this.catalog[name];
-    if (entry) return { kind: "catalog", entry };
+    if (entry) {
+      if (
+        entry.requiresExtension &&
+        entry.extension &&
+        this.extensionIds.size > 0 &&
+        !this.extensionIds.has(entry.extension)
+      )
+        this.report(
+          "FX709",
+          node.loc,
+          `${name} needs the ${entry.extension} extension, which is not loaded. Run "fx feature temporaryvariables enable".`,
+          { length: name.length },
+        );
+      return { kind: "catalog", entry };
+    }
 
     if (segments.length === 1 && state.env.target.decls.funcs.has(name)) {
       state.env.target.usage.funcs.add(name);
@@ -632,6 +649,9 @@ class Analyzer {
         }
         this.walkExpression(statement.value, state);
         break;
+      case "TempVarDecl":
+        this.walkExpression(statement.init, state);
+        break;
       case "Assign":
         this.walkAssign(statement, state);
         break;
@@ -644,6 +664,10 @@ class Analyzer {
   }
 
   walkAssign(statement, state) {
+    if (TEMP_SIGIL.test(statement.name)) {
+      this.walkExpression(statement.value, state);
+      return;
+    }
     const resolved = this.resolveName(state.env, state.params, statement.name);
     if (!resolved || resolved.kind !== "var") {
       this.report(
@@ -875,6 +899,14 @@ class Analyzer {
     const { decls } = target;
 
     for (const [, decl] of [...decls.vars, ...decls.lists]) {
+      if (decl.name.startsWith("$")) {
+        this.report(
+          "FX214",
+          decl.loc,
+          `Reserved temporary-variable name ${JSON.stringify(decl.name)}; names starting with "$" are read as temporary variables.`,
+          { length: decl.name.length },
+        );
+      }
       if (decl.type === "VarDecl" && decl.cloud && !target.isStage) {
         this.report(
           "FX212",
@@ -887,6 +919,15 @@ class Analyzer {
 
     // Shadowing: target-level names hide parameters and stage variables.
     for (const [, fn] of decls.funcs) {
+      for (const param of fn.params) {
+        if (param.name.startsWith("$"))
+          this.report(
+            "FX214",
+            fn.decl?.loc ?? fn.loc,
+            `Reserved temporary-variable name ${JSON.stringify(param.name)}; rename the parameter.`,
+            { length: param.name.length },
+          );
+      }
       for (const param of fn.params) {
         const local = decls.vars.get(param.name) ?? decls.lists.get(param.name);
         if (local) {

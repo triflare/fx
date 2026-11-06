@@ -138,6 +138,9 @@ test("every catalog block survives a build -> decompile -> build round trip", ()
   // fails here instead of quietly becoming a comment.
   const emitted = new Set(opcodes(project));
   for (const [name, entry] of Object.entries(CATALOG)) {
+    // Extension-backed blocks need the feature enabled, so the showcase does
+    // not use them; test/tempvars.test.js covers those entries instead.
+    if (entry.requiresExtension) continue;
     assert.ok(emitted.has(entry.opcode), `${name} -> ${entry.opcode}`);
   }
 });

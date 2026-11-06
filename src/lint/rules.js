@@ -168,6 +168,16 @@ export const RULES = {
       "`cloud let` is only valid at the top level or inside `stage`; the " +
       "project fails to compile when a sprite declares one.",
   },
+  FX214: {
+    id: "FX214",
+    category: "names",
+    severity: "error",
+    summary: "Reserved temporary-variable name",
+    explanation:
+      "Names starting with `$` or `$$` are read as thread/runtime temporary " +
+      "variables, so they cannot be declared with `let`, `list` or a function " +
+      "parameter. Rename the declaration, or use `thread let` / `runtime let`.",
+  },
 
   // ----------------------------------------------------------- control flow
   FX101: {
@@ -393,6 +403,7 @@ const MINIMAL = [
   "FX202",
   "FX204",
   "FX212",
+  "FX214",
   "FX307",
   "FX404",
   "FX803",
