@@ -8,6 +8,7 @@ import {
   isInProject,
   isProjectConfig,
   lintDocument,
+  projectConfigFor,
   publishDiagnostics,
   publishFailure,
 } from "./lint";
@@ -246,6 +247,25 @@ export function activate(context: vscode.ExtensionContext): void {
     );
   };
 
+  /**
+   * Re-lint the project that held `uri`, driven by a source that is still open
+   * in it: one run publishes diagnostics for every open document in the
+   * project. A source without a project is linted on its own, so losing it
+   * cannot change what any other open source reports.
+   */
+  const refreshProjectOf = async (uri: vscode.Uri): Promise<void> => {
+    const configUri = await projectConfigFor(uri);
+    if (!configUri) return;
+    const key = uri.toString();
+    const projectDocument = vscode.workspace.textDocuments.find(
+      (open) =>
+        open.languageId === LANGUAGE_ID &&
+        open.uri.toString() !== key &&
+        isInProject(open, configUri),
+    );
+    if (projectDocument) await refreshDiagnostics(projectDocument, collection);
+  };
+
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
       { language: LANGUAGE_ID },
@@ -284,6 +304,11 @@ export function activate(context: vscode.ExtensionContext): void {
       debounceTimers.delete(key);
       invalidateDocument(document.uri);
       collection.delete(document.uri);
+      // The closed source no longer contributes its declarations to the merged
+      // program, so the project's remaining open sources may be stale.
+      if (document.languageId === LANGUAGE_ID) {
+        void refreshProjectOf(document.uri);
+      }
     }),
   );
 

@@ -105,6 +105,16 @@ async function findConfig(
   }
 }
 
+/** Nearest project configuration for `uri`, if it belongs to a project. */
+export async function projectConfigFor(
+  uri: vscode.Uri,
+): Promise<vscode.Uri | null> {
+  // Unsaved buffers have no directory to search from.
+  if (uri.scheme === "untitled") return null;
+  const folder = vscode.workspace.getWorkspaceFolder(uri);
+  return findConfig(directoryOf(uri), folder?.uri);
+}
+
 /**
  * Lint the project that contains `document`: every `.tfx` file under the
  * nearest `fx.yml`, plus unsaved open documents. Diagnostics are grouped by
@@ -116,10 +126,7 @@ export async function lintDocument(
   // Unsaved buffers are linted on their own: merging unrelated scratch files
   // into a project would invent duplicate-sprite and scope errors.
   const untitled = document.uri.scheme === "untitled";
-  const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-  const configUri = untitled
-    ? null
-    : await findConfig(directoryOf(document.uri), folder?.uri);
+  const configUri = untitled ? null : await projectConfigFor(document.uri);
   const projectRoot = configUri ? directoryOf(configUri) : null;
 
   // Scope the run to the discovered project. Without an fx.yml there is no
