@@ -362,6 +362,71 @@ test("feature enable, update and disable manage the project file", async () => {
   );
 });
 
+test("feature paths cannot escape the project through symlinks", () => {
+  const { dir, configPath } = tempProject();
+  const outside = fs.mkdtempSync(
+    path.join(os.tmpdir(), "fx-tempvars-outside-"),
+  );
+  const link = path.join(dir, "extensions");
+  fs.symlinkSync(outside, link);
+
+  assert.throws(
+    () => enableFeature({ configPath, configDir: dir, name: FEATURE }),
+    /inside the project directory/,
+  );
+  assert.equal(fs.existsSync(path.join(outside, "fx-tempvars.js")), false);
+  fs.rmSync(link);
+
+  // A symlink that stays inside the project is still valid.
+  fs.mkdirSync(path.join(dir, "real"));
+  fs.symlinkSync(path.join(dir, "real"), link);
+  const enabled = enableFeature({ configPath, configDir: dir, name: FEATURE });
+  assert.equal(enabled.file, "./extensions/fx-tempvars.js");
+  assert.ok(fs.existsSync(path.join(dir, "real", "fx-tempvars.js")));
+});
+
+test("disable refuses a feature path that resolves outside the project", () => {
+  const { dir, configPath } = tempProject(
+    'project:\n  name: "Demo"\nfeatures:\n  temporaryvariables: "./extensions/fx-tempvars.js"\n',
+  );
+  const outside = fs.mkdtempSync(
+    path.join(os.tmpdir(), "fx-tempvars-outside-"),
+  );
+  const outsideFile = path.join(outside, "fx-tempvars.js");
+  fs.writeFileSync(outsideFile, fs.readFileSync(fork));
+  fs.mkdirSync(path.join(dir, "extensions"));
+  fs.symlinkSync(outsideFile, path.join(dir, "extensions", "fx-tempvars.js"));
+
+  assert.throws(
+    () => disableFeature({ configPath, configDir: dir, name: FEATURE }),
+    /inside the project directory/,
+  );
+  assert.ok(fs.existsSync(outsideFile));
+  assert.equal(
+    parseConfig(fs.readFileSync(configPath, "utf8")).features.length,
+    1,
+    "a rejected path must leave the config untouched",
+  );
+});
+
+test("disable keeps a feature file that Fx did not install", () => {
+  const { dir, configPath } = tempProject(
+    'project:\n  name: "Demo"\nfeatures:\n  temporaryvariables: "./extensions/fx-tempvars.js"\n',
+  );
+  const target = path.join(dir, "extensions", "fx-tempvars.js");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, "// user-owned extension\n");
+
+  const result = disableFeature({ configPath, configDir: dir, name: FEATURE });
+  assert.equal(result.fileRemoved, false);
+  assert.equal(result.filePreserved, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "// user-owned extension\n");
+  assert.deepEqual(
+    parseConfig(fs.readFileSync(configPath, "utf8")).features,
+    [],
+  );
+});
+
 test("fx feature temporaryvariables enable works from the CLI", () => {
   const { dir } = tempProject();
   const result = spawnSync(

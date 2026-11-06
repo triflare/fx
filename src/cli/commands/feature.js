@@ -65,16 +65,22 @@ export const featureCommand = {
         yes,
       });
       const result = disableFeature({ configPath, configDir, name });
-      reporter.success(
-        `Disabled ${result.feature.title} (${result.file})${
-          result.fileRemoved ? " and deleted its copy" : ""
-        }`,
-      );
+      if (result.fileRemoved)
+        reporter.success(
+          `Disabled ${result.feature.title} (${result.file}) and deleted its copy`,
+        );
+      else
+        reporter.success(`Disabled ${result.feature.title} (${result.file})`);
+      if (result.filePreserved)
+        reporter.info(
+          `Kept ${result.file}: it is not the copy Fx installs, so it may be user-owned`,
+        );
       return {
         feature: result.name,
         action,
         file: result.file,
         fileRemoved: result.fileRemoved,
+        filePreserved: result.filePreserved,
       };
     }
 

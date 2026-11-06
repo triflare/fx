@@ -85,19 +85,47 @@ function relativeProjectPath(configDir, file) {
   return rel.startsWith(".") ? rel : `./${rel}`;
 }
 
-/** Refuse paths that escape the project directory. */
+/** True when `target` is strictly below `base`. Both paths are lexical. */
+function isBelow(base, target) {
+  const rel = path.relative(base, target);
+  return (
+    rel !== "" &&
+    rel !== ".." &&
+    !rel.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(rel)
+  );
+}
+
+/**
+ * Refuse paths that escape the project directory, including through a
+ * symlinked ancestor. The longest existing prefix is resolved, so a target
+ * that does not exist yet is checked against where it would be created.
+ */
 function assertInside(configDir, target, label) {
   const base = path.resolve(configDir);
   const absolute = path.resolve(target);
-  const rel = path.relative(base, absolute);
-  if (
-    rel === "" ||
-    rel === ".." ||
-    rel.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(rel)
-  )
+  const message = `Refusing to use ${label} ${JSON.stringify(absolute)}: it must be inside the project directory`;
+  if (!isBelow(base, absolute)) throw new FeatureError(message);
+
+  let probe = absolute;
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+
+  let baseReal;
+  let probeReal;
+  try {
+    baseReal = fs.realpathSync(base);
+    probeReal = fs.realpathSync(probe);
+  } catch (error) {
+    throw new FeatureError(message, { cause: error });
+  }
+  const rel = path.relative(baseReal, probeReal);
+  if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))
     throw new FeatureError(
-      `Refusing to use ${label} ${JSON.stringify(absolute)}: it must be inside the project directory`,
+      `${message} (it resolves outside the project through a symlink)`,
     );
   return absolute;
 }
@@ -178,8 +206,9 @@ export function enableFeature({
 /**
  * Remove a feature from `fx.yml` and delete the copy Fx installed.
  *
- * Only the known feature filename is deleted, so a hand-pointed entry cannot
- * make this command delete an unrelated project file.
+ * A file is deleted only when its name and bytes match the packaged feature
+ * source that `enable`/`update` write. A hand-pointed or edited project file is
+ * user-owned and survives, even though its `features:` entry is removed.
  */
 export function disableFeature({ configPath, configDir, name } = {}) {
   const feature = getFeature(name);
@@ -196,15 +225,26 @@ export function disableFeature({ configPath, configDir, name } = {}) {
     path.resolve(configDir, entry.file),
     "feature file",
   );
-  const managed = path.basename(target) === feature.filename;
-  const fileExists = managed && fs.existsSync(target);
+  const managedName = path.basename(target) === feature.filename;
+  const fileExists = managedName && fs.existsSync(target);
+  let installedByFx = false;
+  if (fileExists) {
+    try {
+      installedByFx = fs
+        .readFileSync(target)
+        .equals(readFeatureSource(feature.name));
+    } catch {
+      installedByFx = false;
+    }
+  }
   removeFeatureEntry(configPath, feature.name);
-  if (fileExists) fs.rmSync(target, { force: true });
+  if (installedByFx) fs.rmSync(target, { force: true });
   return {
     feature,
     name: feature.name,
     file: entry.file,
-    fileRemoved: fileExists,
+    fileRemoved: installedByFx,
+    filePreserved: fileExists && !installedByFx,
   };
 }
 
