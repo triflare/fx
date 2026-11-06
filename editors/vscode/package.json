@@ -2,7 +2,7 @@
   "name": "fx-language-features",
   "displayName": "Triflare Fx Language Features",
   "description": "Language features for Triflare Fx.",
-  "version": "2.1.0-beta.1",
+  "version": "2.1.0-beta.2",
   "publisher": "triflare",
   "license": "Apache-2.0",
   "repository": {
@@ -13,28 +13,17 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": [
-    "Programming Languages",
-    "Linters"
-  ],
+  "categories": ["Programming Languages", "Linters"],
   "main": "./dist/extension.js",
   "browser": "./dist/extension.js",
-  "extensionKind": [
-    "ui",
-    "workspace"
-  ],
+  "extensionKind": ["ui", "workspace"],
   "activationEvents": [],
   "contributes": {
     "languages": [
       {
         "id": "fx",
-        "aliases": [
-          "Triflare Fx",
-          "fx"
-        ],
-        "extensions": [
-          ".tfx"
-        ],
+        "aliases": ["Triflare Fx", "fx"],
+        "extensions": [".tfx"],
         "configuration": "./language-configuration.json"
       }
     ],
