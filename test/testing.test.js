@@ -482,6 +482,19 @@ test("expect remains assignable and callable", () => {
   assert.equal(body[4].type, "Expect");
 });
 
+test("parenthesized assertion operands remain expressions", () => {
+  const body = parse(
+    'test "grouped" { expect (a) == b; expect ((a + 1)) > b, "grouped"; expect (state.list("items").length) == 2; expect(foo(2)); expect("("); expect(2) { say("ok"); } }',
+  ).tests[0].body;
+  for (const statement of body.slice(0, 3)) {
+    assert.equal(statement.type, "Expect");
+    assert.equal(statement.value.type, "Binary");
+  }
+  assert.equal(body[1].message, "grouped");
+  for (const statement of body.slice(3))
+    assert.equal(statement.type, "BlockCall");
+});
+
 test("disabling tests preserves comments before the next key", () => {
   const dir = tmpProject();
   try {

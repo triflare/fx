@@ -235,12 +235,15 @@ class Parser {
         case "when":
           return this.parseHat();
         case "expect":
-          // Calls and assignments stay normal statements; the assertion form is the
-          // bare `expect <expression>;` statement.
-          if (!(
-            this.peek(1).type === "punct" &&
-            (this.peek(1).value === "(" || ASSIGN_OPS.has(this.peek(1).value))
-          ))
+          // A complete call or assignment stays a normal statement. An
+          // expression continuing after the closing parenthesis is an assertion.
+          if (
+            !(
+              this.peek(1).type === "punct" &&
+              ASSIGN_OPS.has(this.peek(1).value)
+            ) &&
+            !this.isExpectCall()
+          )
             return this.parseExpect();
           break;
         case "if":
@@ -267,6 +270,22 @@ class Parser {
     }
 
     return this.parseSimpleStatement();
+  }
+
+  isExpectCall() {
+    if (this.peek(1).type !== "punct" || this.peek(1).value !== "(")
+      return false;
+    let depth = 0;
+    for (let offset = 1; this.peek(offset).type !== "eof"; offset++) {
+      const token = this.peek(offset);
+      if (token.type !== "punct") continue;
+      if (token.value === "(") depth++;
+      if (token.value === ")" && --depth === 0) {
+        const next = this.peek(offset + 1);
+        return next.type === "punct" && [";", "{"].includes(next.value);
+      }
+    }
+    return false;
   }
 
   parseVarDecl(cloud) {
