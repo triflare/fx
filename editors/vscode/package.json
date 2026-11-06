@@ -2,7 +2,7 @@
   "name": "fx-language-features",
   "displayName": "Triflare Fx Language Features",
   "description": "Language features for Triflare Fx.",
-  "version": "2.1.0",
+  "version": "2.1.0-beta.1",
   "publisher": "triflare",
   "license": "Apache-2.0",
   "repository": {
