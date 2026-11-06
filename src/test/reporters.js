@@ -14,15 +14,18 @@ const yellow = (color, text) => (color ? `\x1b[33m${text}\x1b[0m` : text);
 const dim = (color, text) => (color ? `\x1b[2m${text}\x1b[0m` : text);
 const bold = (color, text) => (color ? `\x1b[1m${text}\x1b[0m` : text);
 
+/** Human-readable duration for terminal output. */
 function seconds(ms) {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+/** Right-align a value in a fixed-width field. */
 function pad(value, width) {
   return String(value).padStart(width);
 }
 
+/** Summary block printed after a terminal run. */
 function summarize(result) {
   const lines = [];
   const { counts } = result;
@@ -45,6 +48,7 @@ function summarize(result) {
   return lines.join("\n");
 }
 
+/** Failure detail blocks for a terminal run, with source locations. */
 function failureBlocks(result, dir) {
   const blocks = [];
   for (const file of result.files) {
@@ -77,6 +81,7 @@ export function jsonReport(result, { events = [], warnings = [] } = {}) {
   };
 }
 
+/** Escape text for use in JUnit attribute values and bodies. */
 function escapeXml(text) {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -196,6 +201,10 @@ export function createTestReporter({
       }
       case "diagnostic":
         clearLive();
+        // JSON and JUnit own the whole stream: a plain diagnostic line would
+        // make the document unparseable. Both reporters carry diagnostics in
+        // their structured payload instead.
+        if (name === "json" || name === "junit") break;
         write(
           `${red(color, "×")} ${event.file ?? "<project>"}${
             event.line ? `:${event.line}` : ""

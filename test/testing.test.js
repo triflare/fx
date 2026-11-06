@@ -470,6 +470,55 @@ test("fx test exit codes cover passing, failing, empty and invalid runs", () => 
   }
 });
 
+test("JSON and JUnit reporters stay parseable when diagnostics occur", () => {
+  const dir = tmpProject({ testSource: 'test "broken" { expect ; }\n' });
+  try {
+    const json = run(["test", "--json"], dir);
+    assert.equal(json.status, TEST_EXIT.ERROR, json.stderr);
+    const document = JSON.parse(json.stdout.trim());
+    assert.equal(document.command, "test");
+    assert.equal(document.ok, false);
+    assert.ok(document.data.diagnostics.length > 0);
+    assert.equal(document.data.counts.tests, 0);
+
+    const junit = run(["test", "--reporter", "junit"], dir);
+    assert.equal(junit.status, TEST_EXIT.ERROR, junit.stderr);
+    const xml = junit.stdout.trim();
+    assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), xml);
+    assert.ok(xml.endsWith("</testsuites>"), xml);
+    assert.doesNotMatch(xml, /×/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fx test loads configured feature extensions in the headless VM", () => {
+  const dir = tmpProject({
+    source: `
+        sprite "Player" {
+            returning function counter() {
+                thread let n = 1;
+                $n += 1;
+                return $n;
+            }
+        }
+    `,
+    testSource: 'test "tempvars" { expect Player.counter() == 2; }\n',
+  });
+  try {
+    enableFeature({
+      configPath: path.join(dir, "fx.yml"),
+      configDir: dir,
+      name: "temporaryvariables",
+    });
+    const result = run(["test"], dir);
+    assert.equal(result.status, TEST_EXIT.OK, result.stdout + result.stderr);
+    assert.match(result.stdout, /1 passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("expect remains assignable and callable", () => {
   const body = parse(
     'test "names" { let expect = 0; expect = 5; expect += 1; expect(2); expect true; }',

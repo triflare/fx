@@ -81,6 +81,10 @@ function renderExpression(node, minimum = 0, parentOperator) {
       return `${node.name}(${node.args
         .map((arg) => renderExpression(arg))
         .join(", ")})`;
+    case "Member":
+      // Member access binds tighter than every operator, so its object is
+      // rendered without parentheses, as in `state.list("items").length`.
+      return `${renderExpression(node.object)}.${node.property}`;
     case "ArrayLiteral":
       return `[${node.items.map((item) => renderExpression(item)).join(", ")}]`;
     case "Unary": {
@@ -131,6 +135,7 @@ function category(node) {
     case "FunctionDecl":
       return "function";
     case "HatDecl":
+    case "TestDecl":
       return "script";
     default:
       return "statement";
@@ -353,6 +358,17 @@ class Formatter {
         this.renderNodeBody(node, indent);
         this.out.push(`${pad}}`);
         return;
+      case "TestDecl":
+        this.out.push(`${pad}test ${stringLiteral(node.name)} {`);
+        this.renderNodeBody(node, indent);
+        this.out.push(`${pad}}`);
+        return;
+      case "Expect":
+        this.out.push(
+          `${pad}expect ${renderExpression(node.value)}` +
+            `${node.message ? `, ${stringLiteral(node.message)}` : ""};`,
+        );
+        return;
       case "If":
         this.renderIf(node, indent);
         return;
@@ -475,7 +491,11 @@ class Formatter {
   format() {
     const units = [];
     if (this.program.stage) units.push(this.program.stage);
-    units.push(...this.program.sprites, ...this.program.topItems);
+    units.push(
+      ...this.program.sprites,
+      ...this.program.topItems,
+      ...this.program.tests,
+    );
     // Preserve the order declarations had in this file; only separate them.
     units.sort((a, b) => this.tokenIndexOf(a.loc) - this.tokenIndexOf(b.loc));
     this.renderBody(units, 0, this.tokens.length - 1);

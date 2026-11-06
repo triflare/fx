@@ -21,6 +21,7 @@ const IGNORED_DIRS = new Set([
 
 const REGEX_SPECIAL = /[.+^${}()|[\]\\]/g;
 
+/** Escape regular-expression syntax so a glob is matched literally. */
 function escapeRegex(text) {
   return text.replace(REGEX_SPECIAL, "\\$&");
 }
@@ -72,6 +73,7 @@ export function matchesTestPattern(
   return globToRegExp(pattern).test(normalized);
 }
 
+/** Recursively collect test files below `current`, skipping ignored dirs. */
 function walk(root, current, found, pattern, extension) {
   let entries;
   try {

@@ -26,8 +26,10 @@ export function resolveInput(input, cwd = process.cwd()) {
   try {
     stat = fs.statSync(resolved);
   } catch {
+    // Name the absolute path that was checked: relative inputs are resolved
+    // from the working directory, not from the project root.
     throw new UsageError(`input not found: ${input}`, {
-      hint: `check the path, or run from the project directory`,
+      hint: `looked for ${resolved}; check the path, or run from the project directory`,
     });
   }
   return stat.isDirectory() ? { dir: resolved } : { file: resolved };

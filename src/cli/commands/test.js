@@ -20,6 +20,7 @@ function reporterName(options) {
   return name;
 }
 
+/** Parse a positive numeric option, reporting usage errors with its label. */
 function validateNumber(value, label) {
   if (value === undefined) return undefined;
   const number = Number(value);

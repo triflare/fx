@@ -40,6 +40,7 @@ export function parseTestFile(source, file = "<test>") {
   return { file, tests: ast.tests, helpers: ast.topItems };
 }
 
+/** Source location of an AST node, defaulting unknown fields to null. */
 function locationOf(node) {
   const loc = node?.loc ?? {};
   return { file: loc.file, line: loc.line, column: loc.column };

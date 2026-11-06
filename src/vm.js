@@ -12,8 +12,12 @@
  */
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
+import { runInThisContext } from "node:vm";
 
 let modules = null;
+
+/** Blob URLs the VM created for project extension sources, keyed by URL. */
+const extensionBlobs = new Map();
 
 /** Install the DOM globals the VM reads while it is being imported. */
 function installGlobals() {
@@ -39,14 +43,65 @@ function installGlobals() {
   };
   globalThis.window ||= globalThis;
   globalThis.self ||= globalThis;
+
+  // The VM loads a project extension like a page does: fetch its URL, wrap the
+  // result in a Blob, read that Blob with FileReader, then append a script.
+  // These shims keep that flow working without a DOM.
+  globalThis.FileReader ||= class {
+    readAsText(blob) {
+      Promise.resolve(blob.text()).then(
+        (result) => this.onload?.({ target: { result } }),
+        (error) => this.onerror?.(error),
+      );
+    }
+  };
+  if (!globalThis.URL.createObjectURL.__fxHeadless) {
+    const createObjectURL = globalThis.URL.createObjectURL.bind(globalThis.URL);
+    globalThis.URL.createObjectURL = (blob) => {
+      const url = createObjectURL(blob);
+      extensionBlobs.set(url, blob);
+      return url;
+    };
+    globalThis.URL.createObjectURL.__fxHeadless = true;
+  }
+
+  /** Run an appended `<script>` whose `src` is one of the VM's Blob URLs. */
+  const runScript = (node) => {
+    const blob = extensionBlobs.get(node.src);
+    if (!blob) {
+      node.onerror?.(new Error(`Cannot read extension script ${node.src}`));
+      return;
+    }
+    Promise.resolve(blob.text()).then(
+      (source) => {
+        try {
+          // The unsandboxed loader installs `global.Scratch` before appending
+          // the script, so evaluating here matches a browser script tag.
+          runInThisContext(source, { filename: node.src });
+          node.onload?.();
+        } catch (error) {
+          node.onerror?.(error);
+        }
+      },
+      (error) => node.onerror?.(error),
+    );
+  };
+
   globalThis.document ||= {
-    createElement: () => ({
+    createElement: (tagName) => ({
+      tagName: String(tagName).toUpperCase(),
       style: {},
       getContext: () => null,
       appendChild() {},
       setAttribute() {},
       addEventListener() {},
+      remove() {},
     }),
+    body: {
+      appendChild(node) {
+        if (node?.tagName === "SCRIPT") runScript(node);
+      },
+    },
     querySelector: () => null,
     addEventListener() {},
   };
@@ -221,6 +276,15 @@ export function createVm() {
   const vm = new VirtualMachine();
   vm.attachStorage(createStorage());
   vm.attachRenderer(createRenderer());
+  // The project was compiled locally from the user's own `fx.yml`, so the
+  // extensions recorded in its `extensionURLs` are trusted: the editor's
+  // "may this project load an extension?" prompt has no counterpart in a
+  // headless run and would otherwise deny every configured extension.
+  vm.securityManager.canLoadExtensionFromProject = () => Promise.resolve(true);
+  // Node has neither the web worker nor the iframe sandbox the VM would use,
+  // so project extensions run in this process, exactly like PenguinMod's
+  // unsandboxed mode.
+  vm.securityManager.getSandboxMode = () => Promise.resolve("unsandboxed");
   return vm;
 }
 
@@ -230,6 +294,14 @@ export function createVm() {
  */
 export const loadProject = async (sb3) => {
   const vm = createVm();
-  await vm.loadProject(sb3);
+  // Loading an extension logs its whole source to the console; keep reporter
+  // output (especially JSON and JUnit) parseable.
+  const log = console.log;
+  console.log = () => {};
+  try {
+    await vm.loadProject(sb3);
+  } finally {
+    console.log = log;
+  }
   return vm;
 };

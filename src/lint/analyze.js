@@ -1252,12 +1252,21 @@ export function lintSources({
     }
   }
 
+  // A source that declares tests is a test file. Test files are never part of
+  // the project program — `mergePrograms` rejects them by design — so they are
+  // left out of the cross-file merge and the project rules. Editors lint every
+  // `.tfx` file in a project, test files included, and must not report the
+  // merge error on each test declaration.
+  const projectParsed = parsed.filter(
+    ({ ast }) => (ast.tests ?? []).length === 0,
+  );
+
   // Partial sprites are resolved by the project merge, which throws when the
   // feature is off or a base declaration is missing. Report those first.
   const partialSprites = Boolean(config?.fx?.partialSprites);
   let partialBlocked = false;
   if (!partialSprites) {
-    for (const { ast } of parsed) {
+    for (const { ast } of projectParsed) {
       for (const sprite of ast.sprites) {
         if (!sprite.partial) continue;
         partialBlocked = true;
@@ -1271,7 +1280,7 @@ export function lintSources({
     }
   }
   const groups = new Map();
-  for (const { ast } of parsed) {
+  for (const { ast } of projectParsed) {
     for (const sprite of ast.sprites) {
       const group = groups.get(sprite.name) ?? { base: false, fragment: null };
       if (sprite.partial) group.fragment ??= sprite;
@@ -1290,10 +1299,10 @@ export function lintSources({
   }
 
   let program = null;
-  if (!partialBlocked) {
+  if (!partialBlocked && projectParsed.length > 0) {
     try {
       program = mergePrograms(
-        parsed.map(({ file, ast }) => ({ ast, file })),
+        projectParsed.map(({ file, ast }) => ({ ast, file })),
         { partialSprites },
       );
     } catch (error) {
@@ -1305,7 +1314,7 @@ export function lintSources({
     }
   }
   if (program) analyzer.analyzeProgram(program);
-  else for (const { ast } of parsed) analyzer.analyzeProgram(ast);
+  else for (const { ast } of projectParsed) analyzer.analyzeProgram(ast);
 
   // Diagnostics from filesystem-backed project checks (assets, fx.lock).
   for (const diagnostic of extraDiagnostics) {

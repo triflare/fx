@@ -378,3 +378,53 @@ test("fx fmt --stdout and --stdin support pipelines", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("formats test declarations, expectations and member expressions", () => {
+  const source = `let shared=0;
+test "one"{expect state.list("items").length==1;}
+returning function helper(){return 1;}
+test "two"{expect helper()==1 ,"helpers";}`;
+  const expected = `let shared = 0;
+
+test "one" {
+    expect state.list("items").length == 1;
+}
+
+returning function helper() {
+    return 1;
+}
+
+test "two" {
+    expect helper() == 1, "helpers";
+}
+`;
+  const formatted = formatSource(source, "score.test.tfx");
+  assert.equal(formatted, expected);
+  assert.equal(formatSource(formatted, "score.test.tfx"), formatted);
+  assert.deepEqual(
+    stripLoc(parse(formatted, "score.test.tfx")),
+    stripLoc(parse(source, "score.test.tfx")),
+  );
+});
+
+test("fx fmt formats an explicitly supplied test file", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "test"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "fx.yml"), 'project:\n  name: "Demo"\n');
+    const file = path.join(dir, "test", "score.test.tfx");
+    fs.writeFileSync(
+      file,
+      'test "score"{expect state.list("items").length==1;}\n',
+    );
+
+    const result = run(["fmt", "test/score.test.tfx"], dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      fs.readFileSync(file, "utf8"),
+      'test "score" {\n    expect state.list("items").length == 1;\n}\n',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

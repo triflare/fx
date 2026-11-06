@@ -60,7 +60,11 @@ class ReturnSignal {
   }
 }
 
-/** Deterministic pseudo-random source for a run. */
+/**
+ * Deterministic pseudo-random source for a run.
+ * @param {number} seed
+ * @returns {() => number} values in `[0, 1)`
+ */
 function mulberry32(seed) {
   let state = seed | 0;
   return () => {
@@ -71,6 +75,7 @@ function mulberry32(seed) {
   };
 }
 
+/** Source location of an AST node, defaulting unknown fields to null. */
 function locOf(node) {
   const loc = node?.loc ?? {};
   return {
@@ -80,6 +85,7 @@ function locOf(node) {
   };
 }
 
+/** Whether a value is, or is entirely made of, a finite number. */
 function isNumeric(value) {
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value === "string") {
@@ -91,6 +97,7 @@ function isNumeric(value) {
   return false;
 }
 
+/** Scratch-style truthiness: `"0"` and `""` are false. */
 function truthy(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -100,6 +107,7 @@ function truthy(value) {
   return Boolean(value);
 }
 
+/** Compare like the VM's `Cast.compare`: numeric when both sides are. */
 function compareValues(left, right) {
   if (isNumeric(left) && isNumeric(right)) {
     const a = Number(left);
@@ -111,6 +119,7 @@ function compareValues(left, right) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** Render a value for an assertion message. */
 function formatValue(value) {
   if (typeof value === "string") return JSON.stringify(value);
   if (value === undefined) return "undefined";
@@ -118,6 +127,7 @@ function formatValue(value) {
   return String(value);
 }
 
+/** Find a project variable by name and variable type, stage first. */
 function findVariable(vm, name, type) {
   const stage = vm.runtime.getTargetForStage?.();
   const targets = [stage, ...vm.runtime.targets.filter((t) => !t.isStage)];
@@ -131,6 +141,7 @@ function findVariable(vm, name, type) {
   return null;
 }
 
+/** Capture the mutable state `reset()` restores between tests. */
 function snapshotVm(vm) {
   return vm.runtime.targets.map((target) => ({
     id: target.id,
@@ -149,6 +160,7 @@ function snapshotVm(vm) {
   }));
 }
 
+/** Restore a snapshot taken by {@link snapshotVm}. */
 function restoreVm(vm, snapshot) {
   vm.stopAll();
   vm.runtime.threads = [];
@@ -170,6 +182,7 @@ function restoreVm(vm, snapshot) {
 
 // ------------------------------------------------------------------ interpreter
 
+/** Execution state for one test: bindings, VM, clocks and captures. */
 function createScope({ vm, config, seed, capture, deadline, warnings }) {
   return {
     vm,
@@ -185,17 +198,20 @@ function createScope({ vm, config, seed, capture, deadline, warnings }) {
   };
 }
 
+/** Abort the test once its wall-clock budget is spent. */
 function checkDeadline(scope) {
   if (performance.now() > scope.deadline)
     throw new TimeoutFailure(scope.config.timeout);
 }
 
+/** Scope for a function call or block: new cells, shared outer bindings. */
 function childScope(scope) {
   // Copy bindings while sharing their cells; declarations and parameters get
   // new cells, while assignments to existing test variables reach the caller.
   return { ...scope, vars: new Map(scope.vars) };
 }
 
+/** Evaluate a test-language expression. */
 function evaluate(node, scope) {
   switch (node.type) {
     case "Number":
@@ -235,6 +251,7 @@ function evaluate(node, scope) {
   }
 }
 
+/** Evaluate a binary operator with short-circuiting for `and`/`or`. */
 function evaluateBinary(node, scope) {
   if (node.op === "and")
     return (
@@ -283,6 +300,7 @@ function evaluateBinary(node, scope) {
   }
 }
 
+/** Read a required argument from a call, failing with its location. */
 function argument(node, index) {
   const value = node.args[index];
   if (value === undefined)
@@ -292,6 +310,7 @@ function argument(node, index) {
   return value;
 }
 
+/** Evaluate a test helper call, `state.*` query or project block call. */
 function evaluateCall(node, scope) {
   const segments = node.segments ?? String(node.name).split(".");
   if (segments[0] === "state")
@@ -573,6 +592,7 @@ function callProjectProcedure(node, scope) {
   }
 }
 
+/** Resolve a `state.*` assertion query against the VM. */
 function stateQuery(segments, node, scope) {
   const [query, property] = segments;
   const args = node.args.map((arg) => evaluate(arg, scope));
@@ -655,6 +675,7 @@ function stateQuery(segments, node, scope) {
   }
 }
 
+/** Run a list of test statements in order. */
 function executeStatements(statements, scope) {
   for (const statement of statements) {
     checkDeadline(scope);
@@ -662,6 +683,7 @@ function executeStatements(statements, scope) {
   }
 }
 
+/** Run one statement node. */
 function executeStatement(node, scope) {
   switch (node.type) {
     case "VarDecl":
@@ -743,6 +765,7 @@ const COMPARISONS = {
   "<=": "to be at most",
 };
 
+/** Throw a detailed `AssertionFailure` when an `expect` is not truthy. */
 function assertExpectation(node, scope) {
   if (truthy(evaluate(node.value, scope))) return;
 
@@ -764,6 +787,13 @@ function assertExpectation(node, scope) {
   });
 }
 
+/**
+ * Advance simulated time by `count` frames.
+ *
+ * `runtime._step()` reads `currentMSecs`, so advancing it directly keeps
+ * waits, timers and the tick counter deterministic and independent of the
+ * real clock.
+ */
 function stepTicks(scope, count) {
   for (let index = 0; index < count; index += 1) {
     checkDeadline(scope);
@@ -778,6 +808,7 @@ function stepTicks(scope, count) {
   }
 }
 
+/** Run a built-in test action, falling back to a project block call. */
 function executeAction(node, scope) {
   const name = (node.segments ?? [node.name]).join(".");
   const arg = (index) => evaluate(argument(node, index), scope);
@@ -850,6 +881,7 @@ function executeAction(node, scope) {
 
 // ---------------------------------------------------------------- run one test
 
+/** Trim a failure result to the fields a reporter needs. */
 function toError(result) {
   return {
     name: result.name,
@@ -862,6 +894,10 @@ function toError(result) {
   };
 }
 
+/**
+ * Run one test in a fresh VM and return its outcome.
+ * @returns {Promise<object>} status, duration, ticks and any failure
+ */
 async function runOneTest({ test, helpers, sb3, config, seed }) {
   const started = performance.now();
   const vm = await loadProject(sb3);
@@ -950,6 +986,7 @@ async function runOneTest({ test, helpers, sb3, config, seed }) {
 
 // ---------------------------------------------------------------------- driver
 
+/** Load vendored, feature and legacy extensions into one catalog. */
 async function loadCatalog({ configDir, loaded }) {
   const catalog = {};
   const extensionUrls = {};
@@ -979,6 +1016,7 @@ async function loadCatalog({ configDir, loaded }) {
   return { catalog, extensionUrls, warnings };
 }
 
+/** One-line description of a failure, with its source location. */
 function describeFailure(error) {
   if (!error) return "";
   const where =

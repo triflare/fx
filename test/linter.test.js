@@ -554,6 +554,35 @@ partial sprite "Cat" {
   );
 });
 
+test("test files are excluded from the merged project program", () => {
+  const projectSource = `sprite "Cat" {
+    when greenFlag {
+        looks.show();
+    }
+}`;
+  const testFile = path.join("test", "cat.test.tfx");
+  const testSource = `let attempts = 0;
+
+test "cat is visible" {
+    start();
+    expect state.sprite("Cat").visible;
+}`;
+  const result = lintSources({
+    sources: [
+      { file: FILE, source: projectSource },
+      { file: testFile, source: testSource },
+    ],
+  });
+
+  // Test declarations never reach `mergePrograms`, so the editor does not
+  // report "declared in a project source" on a project's test files.
+  assert.ok(!ruleIds(result.diagnostics).includes("FX000"));
+  assert.deepEqual(
+    result.diagnostics.filter((entry) => entry.file === testFile),
+    [],
+  );
+});
+
 test("reports missing, unsupported and unused assets", () => {
   const dir = tmp();
   try {
