@@ -156,8 +156,10 @@ vite.config.ts.timestamp-*
 # Turbo Repo
 .turbo
 
-# Cloned sources used for reference only (PenguinMod VM/GUI/gallery/packager)
-reference/
+# Cloned sources used for reference only (PenguinMod VM/GUI/gallery/packager).
+# Anchored to the repository root so the docs' own `reference/` directories
+# (for example `docs/docs/v2/reference/`) are tracked and build in CI.
+/reference/
 
 # Generated PenguinMod Packager distribution (rebuilt by `npm run build:packager`)
 vendor/pm-packager-dist/
