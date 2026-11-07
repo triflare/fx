@@ -61,6 +61,27 @@ export {
   writeLock,
 } from "./vendor.js";
 export { formatDevUrls, injectDevClient, startDevServer } from "./dev.js";
+export {
+  DEFAULT_TEST_PATTERN,
+  discoverTests,
+  globToRegExp,
+  isTestFile,
+  matchesTestPattern,
+} from "./test/discover.js";
+export { parseTestFile, parseTests } from "./test/parse.js";
+export {
+  TEST_EXIT,
+  TestError,
+  formatFailure,
+  runTests,
+} from "./test/runner.js";
+export {
+  REPORTER_NAMES,
+  createTestReporter,
+  jsonReport,
+  junitReport,
+} from "./test/reporters.js";
+export { createVm, loadProject, loadVmModules } from "./vm.js";
 export * from "./catalog.js";
 export * from "./config.js";
 export { FxError, LexError, ParseError, CompileError } from "./errors.js";

@@ -554,6 +554,35 @@ partial sprite "Cat" {
   );
 });
 
+test("test files are excluded from the merged project program", () => {
+  const projectSource = `sprite "Cat" {
+    when greenFlag {
+        looks.show();
+    }
+}`;
+  const testFile = path.join("test", "cat.test.tfx");
+  const testSource = `let attempts = 0;
+
+test "cat is visible" {
+    start();
+    expect state.sprite("Cat").visible;
+}`;
+  const result = lintSources({
+    sources: [
+      { file: FILE, source: projectSource },
+      { file: testFile, source: testSource },
+    ],
+  });
+
+  // Test declarations never reach `mergePrograms`, so the editor does not
+  // report "declared in a project source" on a project's test files.
+  assert.ok(!ruleIds(result.diagnostics).includes("FX000"));
+  assert.deepEqual(
+    result.diagnostics.filter((entry) => entry.file === testFile),
+    [],
+  );
+});
+
 test("reports missing, unsupported and unused assets", () => {
   const dir = tmp();
   try {
@@ -754,6 +783,36 @@ test("linting one file uses the project but reports only that file", () => {
     assert.deepEqual(document.data.diagnostics, []);
     assert.equal(document.data.summary.files, 1);
     assert.equal(document.data.summary.errors, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fx lint keeps helper-only test files out of project scope", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "specs"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "fx.yml"),
+      'project:\n  name: "Demo"\nfx:\n  tests:\n    pattern: "specs/**/*.spec.tfx"\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, "specs", "helpers.spec.tfx"),
+      "let helperValue = 1;\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "src", "main.tfx"),
+      'sprite "Cat" {\n    when greenFlag {\n        looks.say(helperValue);\n    }\n}\n',
+    );
+
+    const result = run(["lint", "--json"], dir);
+    assert.equal(result.status, 1, result.stderr);
+    const document = JSON.parse(result.stdout);
+    assert.deepEqual(
+      document.data.diagnostics.map((entry) => entry.ruleId),
+      ["FX201"],
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 ---
 title: Command reference
-description: Every fx command and option, including build, check, lint, fmt, catalog, package, dev, decompile, vendor, feature, sprite, and completion.
+description: Every fx command and option, including build, check, lint, fmt, test, catalog, package, dev, decompile, vendor, feature, sprite, and completion.
 ---
 
 # Command reference
@@ -171,12 +171,35 @@ fx feature <name> <action> [--force] [--dry-run]
 
 Installs, updates, or removes a built-in language feature. Actions are `enable`, `update`, and `disable`.
 
+The `tests` feature is built into Fx rather than vendored: it supports `enable`, `disable`, and a status report when the action is omitted. `fx feature tests update` fails because there is no vendored file or lock entry.
+
 | Option      | What it does                                          |
 | ----------- | ----------------------------------------------------- |
 | `--force`   | Replaces an installed copy that was edited (`enable`). |
 | `--dry-run` | Previews an update without writing files.             |
 
 See [Project features](/guide/extensions/features).
+
+### fx test
+
+```bash
+fx test [<files...>] [--filter <text>] [--watch] [--reporter <name>] [--seed <number>] [--timeout <ms>]
+```
+
+Builds the project and runs every test file (`test/**/*.test.tfx` by default), starting each test with a fresh copy of the project. Testing must be enabled first with `fx feature tests enable`.
+
+| Option           | What it does                                                          |
+| ---------------- | --------------------------------------------------------------------- |
+| `-t`, `--filter` | Runs only tests whose name or file contains the text.                 |
+| `-w`, `--watch`  | Re-runs when `.tfx` or `fx.yml` files change.                         |
+| `--run`          | Runs once and exits. This is the default.                             |
+| `--reporter`     | `default`, `verbose`, `dot`, `json`, or `junit`.                      |
+| `--seed`         | Overrides `fx.tests.seed` for this run.                               |
+| `--timeout`      | Overrides `fx.tests.timeout` for this run.                            |
+
+Exit codes: `0` all tests passed, `1` a test failed, `2` parse or configuration error, `3` interrupted, `4` invalid usage.
+
+See [Testing](/guide/workflow/testing) for test syntax, actions, state queries, and configuration.
 
 ### fx sprite
 

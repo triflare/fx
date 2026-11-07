@@ -12,7 +12,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseConfig } from "./config.js";
-import { addFeatureEntry, removeFeatureEntry } from "./config-edit.js";
+import {
+  addFeatureEntry,
+  readFxValue,
+  removeFeatureEntry,
+  setFxScalar,
+} from "./config-edit.js";
 import { loadExtensions } from "./extensions.js";
 import { formatDiff } from "./vendor.js";
 
@@ -40,15 +45,29 @@ export const FEATURES = {
   },
 };
 
+/**
+ * Built-in language/compiler features. These have no extension source and no
+ * vendored copy: they live behind a single `fx.<name>` setting, so they are
+ * enabled and disabled without touching `features:`.
+ */
+export const CORE_FEATURES = {
+  tests: {
+    name: "tests",
+    title: "Testing",
+    summary: "Write project tests and run them with `fx test`.",
+    core: true,
+  },
+};
+
 /** List feature names for help and error messages. */
 export function featureNames() {
-  return Object.keys(FEATURES).sort();
+  return [...Object.keys(FEATURES), ...Object.keys(CORE_FEATURES)].sort();
 }
 
 /** Resolve one feature by name. */
 export function getFeature(name) {
   const key = String(name ?? "");
-  const feature = FEATURES[key];
+  const feature = FEATURES[key] ?? CORE_FEATURES[key];
   if (!feature)
     throw new FeatureError(
       `Unknown feature ${JSON.stringify(key)}. Available features: ${featureNames().join(", ")}.`,
@@ -158,6 +177,39 @@ function readFeatureEntries(configPath) {
  * @param {boolean} [options.force] replace a modified copy
  * @returns {{feature: object, name: string, file: string, path: string, changed: boolean, configChanged: boolean}}
  */
+/** True when a feature's setting is enabled in the project config. */
+function coreFeatureEnabled(configPath, feature) {
+  if (!configPath || !fs.existsSync(configPath)) return false;
+  return Boolean(readFxValue(configPath, feature.name));
+}
+
+/**
+ * Whether a feature is currently enabled in a project.
+ * @param {{configPath?: string, name: string}} options
+ */
+export function featureEnabled({ configPath, name } = {}) {
+  const feature = getFeature(name);
+  if (feature.core) return coreFeatureEnabled(configPath, feature);
+  if (!configPath || !fs.existsSync(configPath)) return false;
+  return Boolean(
+    readFeatureEntries(configPath).find((entry) => entry.name === feature.name),
+  );
+}
+
+/**
+ * Enable a feature in a project.
+ *
+ * Extension features copy their source into the project; core features only
+ * record `fx.<name>: true` in `fx.yml`.
+ *
+ * @param {object} options
+ * @param {string} options.configPath
+ * @param {string} options.configDir
+ * @param {string} options.name
+ * @param {string} [options.vendorDir]
+ * @param {boolean} [options.force] replace a modified copy
+ * @returns {{feature: object, name: string, file: string|null, path: string|null, changed: boolean, configChanged: boolean}}
+ */
 export function enableFeature({
   configPath,
   configDir,
@@ -166,6 +218,18 @@ export function enableFeature({
   force = false,
 } = {}) {
   const feature = getFeature(name);
+  if (feature.core) {
+    const changed = !coreFeatureEnabled(configPath, feature);
+    if (changed) setFxScalar(configPath, feature.name, true);
+    return {
+      feature,
+      name: feature.name,
+      file: null,
+      path: null,
+      changed,
+      configChanged: changed,
+    };
+  }
   const dir = assertInside(
     configDir,
     path.resolve(configDir, String(vendorDir || "extensions")),
@@ -212,6 +276,24 @@ export function enableFeature({
  */
 export function disableFeature({ configPath, configDir, name } = {}) {
   const feature = getFeature(name);
+  if (feature.core) {
+    if (!coreFeatureEnabled(configPath, feature))
+      return {
+        feature,
+        name: feature.name,
+        file: null,
+        changed: false,
+        warning: null,
+      };
+    setFxScalar(configPath, feature.name, false);
+    return {
+      feature,
+      name: feature.name,
+      file: null,
+      changed: true,
+      warning: `${feature.title} will become a core feature in a future version.`,
+    };
+  }
   const entry = readFeatureEntries(configPath).find(
     (candidate) => candidate.name === feature.name,
   );
@@ -259,6 +341,10 @@ export function updateFeature({
   dryRun = false,
 } = {}) {
   const feature = getFeature(name);
+  if (feature.core)
+    throw new FeatureError(
+      `${feature.title} is built into Fx, so there is no vendored source or lock entry to update.`,
+    );
   const entry = readFeatureEntries(configPath).find(
     (candidate) => candidate.name === feature.name,
   );

@@ -9,6 +9,7 @@ import { Compiler } from "./compiler.js";
 import { zipSync } from "./sb3.js";
 import { loadConfigFrom, DEFAULT_PROJECT, DEFAULT_FX } from "./config.js";
 import { sourceExtension } from "./brand.js";
+import { DEFAULT_TEST_PATTERN } from "./test/discover.js";
 
 /**
  * @typedef {object} BuildOptions
@@ -30,7 +31,7 @@ import { sourceExtension } from "./brand.js";
  * @param {BuildOptions} options
  * @returns {{dir: string, entries: Array<{file: string, source: string}>}}
  */
-function resolveSources(options) {
+function resolveSources(options, { testPattern = DEFAULT_TEST_PATTERN } = {}) {
   const cwd = process.cwd();
 
   if (Array.isArray(options.sources)) {
@@ -84,7 +85,7 @@ function resolveSources(options) {
   }
 
   const dir = path.resolve(options.dir || cwd);
-  const files = discoverSources(dir);
+  const files = discoverSources(dir, { testPattern });
   if (files.length === 0)
     throw new Error(`No ${sourceExtension()} files found under ${dir}`);
   return {
@@ -101,21 +102,37 @@ function resolveSources(options) {
  * @returns {{project: object, assets: Map<string, Buffer>, sb3: Buffer, config: object, fx: object, ast: object, files: string[], warnings: string[]}}
  */
 export function build(options = {}) {
-  const { dir, entries } = resolveSources(options);
-  if (entries.length === 0)
-    throw new Error("No Triflare Fx sources to compile");
+  // Load the config before scanning, so a project's test glob decides which
+  // files are test files (and therefore excluded from the build).
+  const searchDir =
+    options.configDir ||
+    (options.dir
+      ? path.resolve(options.dir)
+      : options.file
+        ? path.dirname(path.resolve(options.file))
+        : Array.isArray(options.files) && options.files.length > 0
+          ? path.dirname(path.resolve(options.files[0]))
+          : process.cwd());
 
   let projectConfig = options.projectConfig || null;
   let fxConfig = options.fxConfig || null;
   let configPath = null;
   if (!projectConfig && options.useConfigFile !== false) {
-    const loaded = loadConfigFrom(options.configDir || dir);
+    const loaded = loadConfigFrom(searchDir);
     projectConfig = loaded.project;
     fxConfig = loaded.fx;
     configPath = loaded.path;
   }
   if (!projectConfig) projectConfig = { ...DEFAULT_PROJECT };
   if (!fxConfig) fxConfig = { ...DEFAULT_FX };
+
+  const { dir, entries } = resolveSources(options, {
+    testPattern:
+      options.testPattern ??
+      (fxConfig.tests ? fxConfig.tests.pattern : DEFAULT_TEST_PATTERN),
+  });
+  if (entries.length === 0)
+    throw new Error("No Triflare Fx sources to compile");
 
   const asts = entries.map(({ file, source }) => ({
     ast: parse(source, file),

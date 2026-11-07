@@ -26,7 +26,9 @@ building an archive.`,
       migrateLegacy: false,
     });
     const { target, loaded } = state;
-    const files = target.file ? [target.file] : discoverSources(target.dir);
+    const files = target.file
+      ? [target.file]
+      : discoverSources(target.dir, { testPattern: loaded.fx?.tests?.pattern });
     if (files.length === 0)
       throw new UsageError(`No ${EXTENSION} files found under ${target.dir}`);
 

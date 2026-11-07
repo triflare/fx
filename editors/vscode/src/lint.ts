@@ -189,6 +189,8 @@ export async function lintDocument(
     config: parsed?.config ?? null,
     configPath: configUri?.toString() ?? null,
     configDir: configUri ? directoryOf(configUri).toString() : undefined,
+    rootDir: projectRoot?.toString() ?? undefined,
+    testPattern: parsed?.testPattern ?? undefined,
     lintConfig: parsed?.lintConfig ?? undefined,
     declaredExtensions: parsed?.declaredExtensions ?? [],
   }) as { diagnostics: LintDiagnostic[] };

@@ -22,6 +22,7 @@ function extensionName(source) {
  *   config: {fx: {partialSprites: boolean}},
  *   lintConfig: object,
  *   declaredExtensions: string[],
+ *   testPattern: string|null,
  *   projectName: string|null,
  *   error?: string,
  * }}
@@ -35,6 +36,7 @@ export function parseProjectConfigText(text) {
       config: null,
       lintConfig: null,
       declaredExtensions: [],
+      testPattern: null,
       projectName: null,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -44,6 +46,7 @@ export function parseProjectConfigText(text) {
       config: null,
       lintConfig: null,
       declaredExtensions: [],
+      testPattern: null,
       projectName: null,
       error: "fx.yml must contain a mapping at the top level",
     };
@@ -68,6 +71,7 @@ export function parseProjectConfigText(text) {
       config: null,
       lintConfig: null,
       declaredExtensions: [],
+      testPattern: null,
       projectName: typeof project.name === "string" ? project.name : null,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -88,10 +92,20 @@ export function parseProjectConfigText(text) {
     }
   }
 
+  const testPattern =
+    fx.tests &&
+    typeof fx.tests === "object" &&
+    !Array.isArray(fx.tests) &&
+    typeof fx.tests.pattern === "string" &&
+    fx.tests.pattern.trim()
+      ? fx.tests.pattern.trim()
+      : null;
+
   return {
     config: { fx: { partialSprites: Boolean(fx.partialSprites) } },
     lintConfig,
     declaredExtensions: [...declaredExtensions],
+    testPattern,
     projectName: typeof project.name === "string" ? project.name : null,
   };
 }
