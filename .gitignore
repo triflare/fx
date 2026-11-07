@@ -164,5 +164,8 @@ vite.config.ts.timestamp-*
 # Generated PenguinMod Packager distribution (rebuilt by `npm run build:packager`)
 vendor/pm-packager-dist/
 
+# Generated PenguinMod VM distribution (rebuilt by `npm run build:vm`)
+vendor/pm-vm-dist/
+
 # Scratch packager probes used while developing packaging support
 .smoke/
