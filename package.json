@@ -22,6 +22,7 @@
     "bin",
     "src",
     "vendor/pm-packager-dist",
+    "vendor/pm-vm-dist",
     "vendor/tempvars",
     "product.yml",
     "README.md"
@@ -37,9 +38,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "npm run build:packager",
+    "build": "npm run build:packager && npm run build:vm",
     "build:packager": "node scripts/build-packager.js",
-    "prepack": "node scripts/build-packager.js --if-missing"
+    "build:vm": "node scripts/build-vm.js",
+    "prepack": "node scripts/build-packager.js --if-missing && node scripts/build-vm.js --if-missing"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
@@ -47,11 +49,17 @@
     "@turbowarp/sbdl": "^7.0.0",
     "commander": "^15.0.0",
     "cross-fetch": "^4.1.0",
+    "decode-html": "2.0.0",
+    "format-message": "6.2.1",
+    "htmlparser2": "^3.10.0",
+    "immutable": "^3.8.4",
     "js-yaml": "^5.4.3",
     "jszip": "^3.10.1",
+    "minilog": "3.1.0",
     "quickjs-emscripten": "^0.32.0",
-    "scratch-vm": "github:PenguinMod/PenguinMod-Vm#75ef6994e55270b9c2a2f3cb2edf6a5bf31cdf2a",
-    "sha.js": "^2.4.12"
+    "scratch-parser": "github:PenguinMod/PenguinMod-Parser#ad93a6d0d20bcb4374e531ecf20b87b861faf9fb",
+    "sha.js": "^2.4.12",
+    "text-encoding": "0.7.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

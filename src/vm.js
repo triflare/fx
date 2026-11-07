@@ -7,12 +7,24 @@
  * requires the VM lazily. Loading a project never draws anything, so the
  * no-op renderer is enough to deserialize targets, costumes, and blocks.
  *
- * The VM is shipped as a runtime dependency: `fx test` reports a clear
- * error when it is not installed instead of failing at import time.
+ * The VM is vendored as a git submodule and built into `vendor/pm-vm-dist` by
+ * `scripts/build-vm.js`, much like the PenguinMod Packager. `fx test` reports
+ * a clear error when that build is missing instead of failing at import time.
  */
 import crypto from "node:crypto";
+import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { runInThisContext } from "node:vm";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const VM_BUNDLE = path.join(
+  ROOT,
+  "vendor",
+  "pm-vm-dist",
+  "dist",
+  "scratch-vm.js",
+);
 
 let modules = null;
 
@@ -108,26 +120,40 @@ function installGlobals() {
 }
 
 /**
- * Load `scratch-vm` on first use.
- * @returns {{VirtualMachine: any, centralDispatch: any}}
+ * Load the vendored PenguinMod VM on first use.
+ * @returns {{
+ *   VirtualMachine: any,
+ *   centralDispatch: any,
+ *   extensionApi: any,
+ *   Cast: any,
+ *   Color: any,
+ * }}
  */
 export function loadVmModules() {
   if (modules) return modules;
   installGlobals();
   const require = createRequire(import.meta.url);
-  let VirtualMachine;
-  let centralDispatch;
+  let api;
   try {
-    VirtualMachine = require("scratch-vm");
-    centralDispatch = require("scratch-vm/src/dispatch/central-dispatch");
+    api = require(VM_BUNDLE);
   } catch (error) {
     throw new Error(
-      "Running tests needs the PenguinMod VM, which could not be loaded. " +
-        "Reinstall @triflare/fx with its runtime dependencies and try again.",
+      "Running tests needs the PenguinMod VM build, which is missing. " +
+        "Run `npm run build:vm` from the Triflare Fx checkout (or reinstall " +
+        "the package).",
       { cause: error },
     );
   }
-  modules = { VirtualMachine, centralDispatch };
+  if (
+    typeof api?.VirtualMachine !== "function" ||
+    !api.centralDispatch ||
+    !api.extensionApi
+  ) {
+    throw new Error(
+      `The PenguinMod VM at ${VM_BUNDLE} did not export the expected API.`,
+    );
+  }
+  modules = api;
   return modules;
 }
 

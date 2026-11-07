@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   loadExtensions,
@@ -15,8 +14,7 @@ import {
   BlockShape,
   NotchShape,
 } from "../src/extensions.js";
-
-const require = createRequire(import.meta.url);
+import { loadVmModules } from "../src/vm.js";
 
 function tempExtension(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fx-ext-"));
@@ -389,10 +387,8 @@ test("carries extension argument defaults into the catalog", async (t) => {
   ]);
 });
 
-test("shim API matches the scratch-vm extension API", async () => {
-  const vmApi = require("scratch-vm/src/extension-support/tw-extension-api-common");
-  const vmCast = require("scratch-vm/src/util/cast");
-  const vmColor = require("scratch-vm/src/util/color");
+test("shim API matches the vendored PenguinMod VM API", async () => {
+  const { extensionApi: vmApi, Cast: vmCast, Color: vmColor } = loadVmModules();
   const { Scratch: shim } = makeSandbox([]);
 
   for (const name of [
