@@ -920,6 +920,13 @@ const EXTERNAL_IO_APIS = ["fetch", "WebSocket"];
  */
 export function installExternalIOGuard(extensionUrls = []) {
   const allowed = new Set(extensionUrls);
+  for (const url of extensionUrls) {
+    try {
+      allowed.add(new URL(url).href);
+    } catch {
+      // Keep entries that cannot be parsed usable in their original form.
+    }
+  }
   const saved = [];
   const originalFetch = globalThis.fetch;
   const block = (name) => {

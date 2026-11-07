@@ -111,16 +111,31 @@ function escapeXml(text) {
 
 /** JUnit XML for CI integrations. */
 export function junitReport(result) {
-  const errors = result.files.reduce(
+  const diagnostics = result.files.length ? [] : (result.diagnostics ?? []);
+  const files = diagnostics.length
+    ? [
+        {
+          file: "<project>",
+          durationMs: result.durationMs,
+          tests: diagnostics.map((diagnostic, index) => ({
+            name: `diagnostic ${index + 1}`,
+            status: "error",
+            durationMs: 0,
+            error: diagnostic,
+          })),
+        },
+      ]
+    : result.files;
+  const errors = files.reduce(
     (total, file) =>
       total + file.tests.filter((test) => test.status === "error").length,
     0,
   );
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>'];
   lines.push(
-    `<testsuites name="fx" tests="${result.counts.tests}" failures="${result.counts.failed}" errors="${errors}" time="${(result.durationMs / 1000).toFixed(3)}">`,
+    `<testsuites name="fx" tests="${result.counts.tests + diagnostics.length}" failures="${result.counts.failed}" errors="${errors}" time="${(result.durationMs / 1000).toFixed(3)}">`,
   );
-  for (const file of result.files) {
+  for (const file of files) {
     lines.push(
       `  <testsuite name="${escapeXml(file.file)}" tests="${file.tests.length}" failures="${file.tests.filter((t) => t.status === "failed").length}" errors="${file.tests.filter((t) => t.status === "error").length}" time="${(file.durationMs / 1000).toFixed(3)}">`,
     );

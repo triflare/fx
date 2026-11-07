@@ -585,6 +585,7 @@ test("reporters distinguish execution errors from assertion failures", () => {
   ];
   const xml = junitReport({
     files,
+    diagnostics: [{ message: "already reported per file" }],
     counts: { tests: 5, failed: 1, errors: 99 },
     durationMs: 0,
   });
@@ -610,6 +611,43 @@ test("reporters distinguish execution errors from assertion failures", () => {
     reporter.onEvent({ event: "file-result", ...files[0], status: "error" });
     if (name !== "dot")
       assert.match(output.text(), /4 tests \| 1 failed \| 1 errors/);
+  }
+});
+
+test("JUnit reports each run diagnostic as an error when no files ran", () => {
+  for (const diagnostics of [
+    [],
+    [
+      { name: "ParseError", message: "invalid <test> & source" },
+      { message: "build failed" },
+    ],
+  ]) {
+    const xml = junitReport({
+      files: [],
+      diagnostics,
+      counts: { tests: 0, failed: 0 },
+      durationMs: 0,
+    });
+    const count = diagnostics.length;
+    assert.match(
+      xml,
+      new RegExp(
+        `<testsuites name="fx" tests="${count}" failures="0" errors="${count}"`,
+      ),
+    );
+    assert.equal((xml.match(/<testcase /g) ?? []).length, count);
+    assert.equal((xml.match(/<error /g) ?? []).length, count);
+    if (count) {
+      assert.match(
+        xml,
+        /<testsuite name="&lt;project&gt;" tests="2" failures="0" errors="2"/,
+      );
+      assert.match(
+        xml,
+        /<error message="invalid &lt;test&gt; &amp; source" type="ParseError"/,
+      );
+      assert.match(xml, /<error message="build failed" type="Error"/);
+    }
   }
 });
 
@@ -821,8 +859,8 @@ test("network guard applies the same rules to URL objects and Request inputs", a
     calls.push(input);
     return "allowed";
   };
-  const extension = "https://example.invalid/extension.js";
-  const restore = installExternalIOGuard([extension]);
+  const extension = "HTTPS://EXAMPLE.INVALID:443/a/../extension.js";
+  const restore = installExternalIOGuard([extension, "invalid URL"]);
   try {
     for (const url of [
       extension,
@@ -830,7 +868,7 @@ test("network guard applies the same rules to URL objects and Request inputs", a
       "blob:local",
       "file:///local",
     ]) {
-      for (const input of [url, new URL(url), { url }])
+      for (const input of [url, new URL(url), new Request(url), { url }])
         assert.equal(await fetch(input), "allowed");
     }
     for (const input of [
@@ -838,7 +876,8 @@ test("network guard applies the same rules to URL objects and Request inputs", a
       new Request("https://example.invalid/blocked"),
     ])
       await assert.rejects(fetch(input), /network access is blocked/);
-    assert.equal(calls.length, 12);
+    assert.equal(await fetch("invalid URL"), "allowed");
+    assert.equal(calls.length, 17);
   } finally {
     restore();
     globalThis.fetch = originalFetch;
