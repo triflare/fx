@@ -10,6 +10,7 @@
  * singleton, and the extension API used by the tests.
  */
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
@@ -193,11 +194,21 @@ async function main() {
 
   const commit = git(["-C", "vendor/pm-vm", "rev-parse", "HEAD"]);
   const upstream = readJson(path.join(SUBMODULE, "package.json"));
+  // Hash source bytes so EXTERNALS, BUILD_DEPENDENCIES, webpackConfig, and
+  // build logic are covered without embedding checkout-specific absolute paths.
+  const inputHash = createHash("sha256")
+    .update(fs.readFileSync(fileURLToPath(import.meta.url)))
+    .update(fs.readFileSync(ENTRY))
+    .digest("hex");
 
   if (!force && fs.existsSync(BUNDLE) && fs.existsSync(MARKER)) {
     try {
       const marker = readJson(MARKER);
-      if (marker.commit === commit && marker.version === upstream.version) {
+      if (
+        marker.commit === commit &&
+        marker.version === upstream.version &&
+        marker.inputHash === inputHash
+      ) {
         log(`vm ${upstream.version} (${commit.slice(0, 12)}) is up to date`);
         return;
       }
@@ -244,6 +255,7 @@ License: BSD-3-Clause (see LICENSE)
         name: upstream.name,
         version: upstream.version,
         commit,
+        inputHash,
         builtAt: new Date().toISOString(),
       },
       null,

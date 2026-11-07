@@ -12,6 +12,7 @@
  * a clear error when that build is missing instead of failing at import time.
  */
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -137,6 +138,7 @@ export function loadVmModules() {
   try {
     api = require(VM_BUNDLE);
   } catch (error) {
+    if (fs.existsSync(VM_BUNDLE)) throw error;
     throw new Error(
       "Running tests needs the PenguinMod VM build, which is missing. " +
         "Run `npm run build:vm` from the Triflare Fx checkout (or reinstall " +
