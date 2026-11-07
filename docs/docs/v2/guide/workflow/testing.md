@@ -122,15 +122,19 @@ fx:
     timeout: 1000
     ticksPerSecond: 30
     failOnRuntimeError: true
+    allowProjectExtensions: false
 ```
 
-| Setting              | What it does                                                     |
-| -------------------- | ---------------------------------------------------------------- |
-| `pattern`            | Which files count as tests. The default is `test/**/*.test.tfx`. |
-| `seed`               | Fixes randomness so runs repeat exactly.                         |
-| `timeout`            | How long one test may take, in milliseconds.                     |
-| `ticksPerSecond`     | How many frames one second of project time contains.             |
-| `failOnRuntimeError` | Fails a test when the project reports an error.                  |
+| Setting                  | What it does                                                     |
+| ------------------------ | ---------------------------------------------------------------- |
+| `pattern`                | Which files count as tests. The default is `test/**/*.test.tfx`. |
+| `seed`                   | Fixes randomness so runs repeat exactly.                         |
+| `timeout`                | How long one test may take, in milliseconds.                     |
+| `ticksPerSecond`         | How many frames one second of project time contains.             |
+| `failOnRuntimeError`     | Fails a test when the project reports an error.                  |
+| `allowProjectExtensions` | Runs the project's extensions during tests. Off by default.      |
+
+Project extensions are ordinary JavaScript. There is no browser sandbox in a headless run, so loading one runs it in the same Node process as `fx test`, with access to the filesystem and the network. Tests do not load them unless `allowProjectExtensions` is `true`; without that opt-in, `fx test` stops with an error when the project configures extensions, even if no test calls their blocks. Only opt in for extensions you trust.
 
 ## Run tests
 

@@ -267,33 +267,44 @@ export function createRenderer() {
 /**
  * Create a headless VM with in-memory storage and a no-op renderer.
  *
+ * Project extensions are plain JavaScript, and the only way to run them here is
+ * unsandboxed in this Node process: loading one is equivalent to running the
+ * project's code with full filesystem and network access. Nothing is loaded
+ * unless `allowProjectExtensions` is set. Callers opt in explicitly (for `fx
+ * test` that means `fx.tests.allowProjectExtensions: true`) to state that the
+ * project's extensions are trusted.
+ *
  * The dispatch broker is a process-wide singleton; dropping its services keeps
  * one VM's extensions from logging a provider conflict for the next.
+ *
+ * @param {{allowProjectExtensions?: boolean}} [options]
  */
-export function createVm() {
+export function createVm({ allowProjectExtensions = false } = {}) {
   const { VirtualMachine, centralDispatch } = loadVmModules();
   centralDispatch.services = {};
   const vm = new VirtualMachine();
   vm.attachStorage(createStorage());
   vm.attachRenderer(createRenderer());
-  // The project was compiled locally from the user's own `fx.yml`, so the
-  // extensions recorded in its `extensionURLs` are trusted: the editor's
-  // "may this project load an extension?" prompt has no counterpart in a
-  // headless run and would otherwise deny every configured extension.
-  vm.securityManager.canLoadExtensionFromProject = () => Promise.resolve(true);
-  // Node has neither the web worker nor the iframe sandbox the VM would use,
-  // so project extensions run in this process, exactly like PenguinMod's
-  // unsandboxed mode.
-  vm.securityManager.getSandboxMode = () => Promise.resolve("unsandboxed");
+  // Denying the load keeps both the extension source and its top-level code
+  // from running, even when the project only configured it and no block uses
+  // it. The VM reports "Permission to load extension denied" for the project.
+  vm.securityManager.canLoadExtensionFromProject = () =>
+    Promise.resolve(allowProjectExtensions);
+  // Node has neither the web worker nor the iframe sandbox the VM would use, so
+  // a permitted extension runs in this process, exactly like PenguinMod's
+  // unsandboxed mode. Denied extensions never reach the sandbox selector.
+  vm.securityManager.getSandboxMode = () =>
+    Promise.resolve(allowProjectExtensions ? "unsandboxed" : "iframe");
   return vm;
 }
 
 /**
  * Build a fresh VM and load an sb3/pmp buffer into it.
  * @param {Buffer} sb3
+ * @param {{allowProjectExtensions?: boolean}} [options]
  */
-export const loadProject = async (sb3) => {
-  const vm = createVm();
+export const loadProject = async (sb3, options = {}) => {
+  const vm = createVm(options);
   // Loading an extension logs its whole source to the console; keep reporter
   // output (especially JSON and JUnit) parseable.
   const log = console.log;

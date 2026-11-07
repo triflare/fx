@@ -14,6 +14,7 @@ import { ParseError } from "../errors.js";
 import { tokenizeWithComments } from "../lexer.js";
 import { mergePrograms } from "../merge.js";
 import { parse } from "../parser.js";
+import { DEFAULT_TEST_PATTERN, isTestPath } from "../test/pattern.js";
 import { DEFAULT_LINT, resolveRuleSeverities } from "./config.js";
 import { RULES, ruleById } from "./rules.js";
 
@@ -1193,6 +1194,7 @@ export function sortDiagnostics(diagnostics) {
  *   configPath?: string|null,
  *   configDir?: string|null,
  *   rootDir?: string|null,
+ *   testPattern?: string|null,
  *   extensionCatalog?: Record<string, object>,
  *   declaredExtensions?: string[],
  *   lintConfig?: object,
@@ -1211,6 +1213,9 @@ export function lintSources({
   sources = [],
   config = null,
   configPath = null,
+  configDir = null,
+  rootDir = null,
+  testPattern = DEFAULT_TEST_PATTERN,
   extensionCatalog = {},
   declaredExtensions = [],
   lintConfig = DEFAULT_LINT,
@@ -1252,13 +1257,19 @@ export function lintSources({
     }
   }
 
-  // A source that declares tests is a test file. Test files are never part of
-  // the project program — `mergePrograms` rejects them by design — so they are
+  // A source that declares tests, or whose path matches the configured
+  // test-file pattern, is a test file. Test files are never part of the
+  // project program — `mergePrograms` rejects them by design — so they are
   // left out of the cross-file merge and the project rules. Editors lint every
   // `.tfx` file in a project, test files included, and must not report the
-  // merge error on each test declaration.
+  // merge error on each test declaration. Pattern matching also keeps a
+  // helper-only test file (no `test` declarations) from leaking its top-level
+  // variables into project scope.
+  const testRoot = rootDir ?? configDir ?? null;
   const projectParsed = parsed.filter(
-    ({ ast }) => (ast.tests ?? []).length === 0,
+    ({ file, ast }) =>
+      (ast.tests ?? []).length === 0 &&
+      !isTestPath(file, testRoot, testPattern),
   );
 
   // Partial sprites are resolved by the project merge, which throws when the

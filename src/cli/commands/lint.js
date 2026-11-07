@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { sourceExtension } from "../../brand.js";
 import { discoverSources } from "../../project.js";
+import { DEFAULT_TEST_PATTERN } from "../../test/discover.js";
 import { applyFixes, lintSources } from "../../linter.js";
 import {
   effectivePreset,
@@ -178,6 +179,9 @@ Exit status is 1 when errors are reported, or when warnings are reported with
       configPath: state.loaded.path,
       configDir: state.configDir,
       rootDir: state.configDir ?? cwd,
+      testPattern: state.loaded.fx?.tests
+        ? state.loaded.fx.tests.pattern
+        : DEFAULT_TEST_PATTERN,
       extensionCatalog: state.catalog,
       lintConfig,
       strict: Boolean(options.strict),

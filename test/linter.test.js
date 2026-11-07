@@ -788,6 +788,36 @@ test("linting one file uses the project but reports only that file", () => {
   }
 });
 
+test("fx lint keeps helper-only test files out of project scope", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "specs"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "fx.yml"),
+      'project:\n  name: "Demo"\nfx:\n  tests:\n    pattern: "specs/**/*.spec.tfx"\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, "specs", "helpers.spec.tfx"),
+      "let helperValue = 1;\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "src", "main.tfx"),
+      'sprite "Cat" {\n    when greenFlag {\n        looks.say(helperValue);\n    }\n}\n',
+    );
+
+    const result = run(["lint", "--json"], dir);
+    assert.equal(result.status, 1, result.stderr);
+    const document = JSON.parse(result.stdout);
+    assert.deepEqual(
+      document.data.diagnostics.map((entry) => entry.ruleId),
+      ["FX201"],
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("lint --strict fails on warnings and --rule can switch them off", () => {
   const dir = project(`sprite "Cat" {
     let spare = 1;

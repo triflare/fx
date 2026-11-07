@@ -18,6 +18,7 @@ import {
 } from "../src/features.js";
 import { runTests, TEST_EXIT } from "../src/test/runner.js";
 import { createTestReporter } from "../src/test/reporters.js";
+import { createVm } from "../src/vm.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bin = path.join(root, "bin", "fx.js");
@@ -110,6 +111,12 @@ test("fx.tests accepts true, false and a mapping of overrides", () => {
   assert.equal(custom.timeout, 500);
   assert.equal(custom.failOnRuntimeError, false);
   assert.equal(custom.ticksPerSecond, DEFAULT_TESTS.ticksPerSecond);
+  assert.equal(DEFAULT_TESTS.allowProjectExtensions, false);
+  assert.equal(
+    parseConfig("fx:\n  tests:\n    allowProjectExtensions: true\n").fx.tests
+      .allowProjectExtensions,
+    true,
+  );
   assert.throws(
     () => parseConfig("fx:\n  tests:\n    nope: 1\n"),
     /unknown fx.tests setting/,
@@ -348,6 +355,24 @@ test("a failing assertion reports expected, received and a source location", asy
   }
 });
 
+test("broadcastAndWait ignores threads started outside the broadcast", async () => {
+  const dir = tmpProject({
+    source: `sprite "Player" {
+      let pings = 0;
+      when greenFlag { forever { control.wait(1); } }
+      when broadcast("ping") { pings += 1; }
+    }`,
+    testSource:
+      'test "waits only for its scripts" { start(); step(1); broadcastAndWait("ping"); expect state.variable("pings") == 1; }\n',
+  });
+  try {
+    const result = await runTests({ dir, timeout: 500 });
+    assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("filtering and deterministic reruns work", async () => {
   const dir = tmpProject();
   try {
@@ -441,6 +466,47 @@ test("reporters render the same run as terminal, dot, verbose, JSON and JUnit", 
   }
 });
 
+test("reporters show discovered tests as pending, running and completed", async () => {
+  const dir = tmpProject({
+    testSource: 'test "passes" { expect 1 == 1; }\n',
+  });
+  try {
+    const output = memoryStream();
+    const reporter = createTestReporter({
+      name: "verbose",
+      stream: output.stream,
+      dir,
+    });
+    const result = await runTests({ dir, onEvent: reporter.onEvent });
+    assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
+
+    const text = output.text();
+    assert.match(text, /↓ test\/score\.test\.tfx > passes pending/);
+    assert.match(text, /▸ test\/score\.test\.tfx > passes running/);
+    assert.match(text, /✓ passes/);
+
+    const discovered = reporter.events.find(
+      (event) => event.event === "discovered",
+    );
+    assert.deepEqual(discovered.files, [
+      {
+        file: "test/score.test.tfx",
+        tests: [{ name: "passes", status: "pending" }],
+      },
+    ]);
+    const running = reporter.events.find(
+      (event) => event.event === "test-start",
+    );
+    assert.equal(running.status, "running");
+    const completed = reporter.events.find(
+      (event) => event.event === "test-result",
+    );
+    assert.equal(completed.status, "passed");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fx test exit codes cover passing, failing, empty and invalid runs", () => {
   const passing = tmpProject();
   const failing = tmpProject({
@@ -503,6 +569,7 @@ test("fx test loads configured feature extensions in the headless VM", () => {
             }
         }
     `,
+    tests: "\n    allowProjectExtensions: true",
     testSource: 'test "tempvars" { expect Player.counter() == 2; }\n',
   });
   try {
@@ -517,6 +584,67 @@ test("fx test loads configured feature extensions in the headless VM", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("project extensions are blocked during tests until the project opts in", async () => {
+  const extension = `
+class FxTestExtension {
+  getInfo() {
+    return { id: "fxtestext", name: "Fx Test", blocks: [] };
+  }
+}
+Scratch.extensions.register(new FxTestExtension());
+`;
+  const dir = tmpProject({
+    testSource: 'test "passes" { expect 1 == 1; }\n',
+  });
+  try {
+    fs.writeFileSync(path.join(dir, "ext.js"), extension);
+    const configPath = path.join(dir, "fx.yml");
+    const writeConfig = (allow) =>
+      fs.writeFileSync(
+        configPath,
+        `project:
+  name: "Demo"
+  extensions:
+    - "./ext.js"
+fx:
+  tests:${allow ? "\n    allowProjectExtensions: true" : " true"}
+`,
+      );
+
+    writeConfig(false);
+    const blocked = await runTests({ dir });
+    assert.equal(blocked.exitCode, TEST_EXIT.ERROR);
+    assert.equal(blocked.counts.tests, 0);
+    assert.match(blocked.diagnostics[0].message, /allowProjectExtensions/);
+
+    writeConfig(true);
+    const allowed = await runTests({ dir });
+    assert.equal(allowed.exitCode, TEST_EXIT.OK, JSON.stringify(allowed));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the headless VM denies project extensions until they are trusted", async () => {
+  const url = "data:text/javascript,void 0";
+  const blocked = createVm();
+  assert.equal(
+    await blocked.securityManager.canLoadExtensionFromProject(url),
+    false,
+  );
+  assert.equal(await blocked.securityManager.getSandboxMode(url), "iframe");
+
+  const trusted = createVm({ allowProjectExtensions: true });
+  assert.equal(
+    await trusted.securityManager.canLoadExtensionFromProject(url),
+    true,
+  );
+  assert.equal(
+    await trusted.securityManager.getSandboxMode(url),
+    "unsandboxed",
+  );
 });
 
 test("expect remains assignable and callable", () => {

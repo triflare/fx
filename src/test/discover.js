@@ -7,9 +7,13 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_TEST_PATTERN, matchesTestPattern } from "./pattern.js";
 
-/** Default test-file glob, relative to the project directory. */
-export const DEFAULT_TEST_PATTERN = "test/**/*.test.tfx";
+export {
+  DEFAULT_TEST_PATTERN,
+  globToRegExp,
+  matchesTestPattern,
+} from "./pattern.js";
 
 const IGNORED_DIRS = new Set([
   "node_modules",
@@ -18,60 +22,6 @@ const IGNORED_DIRS = new Set([
   "coverage",
   ".cache",
 ]);
-
-const REGEX_SPECIAL = /[.+^${}()|[\]\\]/g;
-
-/** Escape regular-expression syntax so a glob is matched literally. */
-function escapeRegex(text) {
-  return text.replace(REGEX_SPECIAL, "\\$&");
-}
-
-/**
- * Translate a small glob (`**`, `*`, `?`) into an anchored regular expression.
- * A double star followed by a slash also matches zero directories, so
- * `test/**\/*.test.tfx` matches `test/score.test.tfx`.
- *
- * @param {string} pattern
- * @returns {RegExp}
- */
-export function globToRegExp(pattern) {
-  const normalized = String(pattern).replace(/\\/g, "/").replace(/^\.\//, "");
-  let source = "";
-  for (let index = 0; index < normalized.length; index += 1) {
-    const char = normalized[index];
-    if (char === "*") {
-      if (normalized[index + 1] === "*") {
-        index += 1;
-        if (normalized[index + 1] === "/") {
-          index += 1;
-          source += "(?:.*/)?";
-        } else {
-          source += ".*";
-        }
-      } else {
-        source += "[^/]*";
-      }
-    } else if (char === "?") {
-      source += "[^/]";
-    } else {
-      source += escapeRegex(char);
-    }
-  }
-  return new RegExp(`^${source}$`);
-}
-
-/**
- * Whether a project-relative path (posix separators) is a test file.
- * @param {string} relativePath
- * @param {string} [pattern]
- */
-export function matchesTestPattern(
-  relativePath,
-  pattern = DEFAULT_TEST_PATTERN,
-) {
-  const normalized = String(relativePath).replace(/\\/g, "/");
-  return globToRegExp(pattern).test(normalized);
-}
 
 /** Recursively collect test files below `current`, skipping ignored dirs. */
 function walk(root, current, found, pattern, extension) {

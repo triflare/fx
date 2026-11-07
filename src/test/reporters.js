@@ -165,19 +165,43 @@ export function createTestReporter({
             `\n ${bold(color, "RUN")}  ${dim(color, `v${event.version}`)} ${event.dir}\n\n`,
           );
         break;
+      case "discovered":
+        if (name === "default") {
+          for (const file of event.files)
+            write(
+              `  ${dim(color, "PENDING")}  ${file.file} (${file.tests.length} ${
+                file.tests.length === 1 ? "test" : "tests"
+              })\n`,
+            );
+        } else if (name === "verbose") {
+          for (const file of event.files)
+            for (const test of file.tests)
+              write(
+                `   ${yellow(color, "↓")} ${file.file} > ${test.name} ${dim(color, test.status)}\n`,
+              );
+        }
+        break;
       case "test-start":
-        if (tty && name === "default")
+        if (name === "verbose")
+          write(
+            `   ${dim(color, "▸")} ${event.file} > ${event.name} ${dim(color, event.status)}\n`,
+          );
+        else if (tty && name === "default")
           live(dim(color, `  ▸ ${event.file} > ${event.name}`));
         break;
       case "test-result":
         clearLive();
-        if (name === "verbose")
-          write(
+        if (name === "verbose") {
+          const mark =
             event.status === "passed"
-              ? `   ${green(color, "✓")} ${event.name} ${dim(color, seconds(event.durationMs))}\n`
-              : `   ${red(color, "×")} ${event.name} ${dim(color, seconds(event.durationMs))}\n`,
+              ? green(color, "✓")
+              : event.status === "failed"
+                ? red(color, "×")
+                : yellow(color, "↓");
+          write(
+            `   ${mark} ${event.name} ${dim(color, seconds(event.durationMs))}\n`,
           );
-        else if (name === "dot")
+        } else if (name === "dot")
           write(
             event.status === "passed"
               ? green(color, "·")

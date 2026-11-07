@@ -839,10 +839,16 @@ function executeAction(node, scope) {
     case "broadcastAndWait": {
       const message = String(arg(0));
       scope.broadcasts.add(message);
-      vm.runtime.startHats("event_whenbroadcastreceived", {
+      const threads = vm.runtime.startHats("event_whenbroadcastreceived", {
         BROADCAST_OPTION: message,
       });
-      while (vm.runtime.threads.length > 0) stepTicks(scope, 1);
+      // Only wait for the scripts this broadcast started. Other threads, such
+      // as a `forever` loop launched by `start()`, keep running independently.
+      while (
+        Array.isArray(threads) &&
+        threads.some((thread) => vm.runtime.threads.includes(thread))
+      )
+        stepTicks(scope, 1);
       return;
     }
     case "click": {
@@ -900,7 +906,9 @@ function toError(result) {
  */
 async function runOneTest({ test, helpers, sb3, config, seed }) {
   const started = performance.now();
-  const vm = await loadProject(sb3);
+  const vm = await loadProject(sb3, {
+    allowProjectExtensions: config.allowProjectExtensions,
+  });
   vm.runtime.currentStepTime = 1000 / config.ticksPerSecond;
   // The sequencer refreshes this clock each frame; keep it on simulated time.
   vm.runtime.updateCurrentMSecs = () => {};
@@ -1151,8 +1159,52 @@ export async function runTests({
     return result;
   }
 
+  // Discovery happens before the build so reporters can show every selected
+  // test as pending, then running, then completed.
+  const needle = String(filter ?? "").toLowerCase();
+  const wanted = (file, test) =>
+    needle === "" ||
+    file.toLowerCase().includes(needle) ||
+    test.toLowerCase().includes(needle);
+  onEvent({
+    event: "discovered",
+    files: parsed.files
+      .map((file) => ({
+        file: file.file,
+        tests: file.tests
+          .filter((test) => wanted(file.file, test.name))
+          .map((test) => ({ name: test.name, status: "pending" })),
+      }))
+      .filter((file) => file.tests.length > 0),
+  });
+
   let extensions = { catalog, extensionUrls, warnings: [] };
   if (!catalog) extensions = await loadCatalog({ configDir, loaded });
+
+  // A project extension is arbitrary JavaScript that would run with Node
+  // process access in the VM, including its top-level code and configured
+  // extensions no test calls. Without an explicit opt-in, stop before running
+  // anything and say why instead of loading it or silently ignoring it.
+  const projectExtensionUrls = extensions.extensionUrls ?? {};
+  if (
+    !config.allowProjectExtensions &&
+    Object.keys(projectExtensionUrls).length > 0
+  ) {
+    const ids = Object.keys(projectExtensionUrls).sort();
+    result.diagnostics.push({
+      file: null,
+      message:
+        `Project extensions are blocked during fx test: ${ids
+          .map((id) => JSON.stringify(id))
+          .join(", ")}. ` +
+        'Set "fx.tests.allowProjectExtensions: true" in fx.yml to trust and load this project\'s extensions.',
+    });
+    result.exitCode = TEST_EXIT.ERROR;
+    onEvent({ event: "diagnostic", ...result.diagnostics[0] });
+    result.durationMs = Math.round(performance.now() - started);
+    onEvent({ event: "run-end", result });
+    return result;
+  }
 
   let built;
   try {
@@ -1179,12 +1231,6 @@ export async function runTests({
     return result;
   }
 
-  const needle = String(filter ?? "").toLowerCase();
-  const wanted = (file, test) =>
-    needle === "" ||
-    file.toLowerCase().includes(needle) ||
-    test.toLowerCase().includes(needle);
-
   for (const file of parsed.files) {
     const selected = file.tests.filter((test) => wanted(file.file, test.name));
     if (selected.length === 0) continue;
@@ -1199,7 +1245,12 @@ export async function runTests({
     onEvent({ event: "file-start", file: file.file });
 
     for (const test of selected) {
-      onEvent({ event: "test-start", file: file.file, name: test.name });
+      onEvent({
+        event: "test-start",
+        file: file.file,
+        name: test.name,
+        status: "running",
+      });
       let outcome;
       try {
         outcome = await runOneTest({
