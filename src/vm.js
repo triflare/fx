@@ -167,11 +167,11 @@ export function createStorage() {
         assetId: assetId ?? (generateId ? md5(bytes) : null),
         clean: true,
         encodeDataURI() {
-          const base64 = Buffer.from(bytes).toString("base64");
+          const base64 = Buffer.from(this.data).toString("base64");
           return `data:${dataFormat};base64,${base64}`;
         },
         decodeText() {
-          return Buffer.from(bytes).toString("utf8");
+          return Buffer.from(this.data).toString("utf8");
         },
         encodeTextData(text) {
           this.data = new Uint8Array(Buffer.from(text, "utf8"));
@@ -271,8 +271,8 @@ export function createRenderer() {
  * unsandboxed in this Node process: loading one is equivalent to running the
  * project's code with full filesystem and network access. Nothing is loaded
  * unless `allowProjectExtensions` is set. Callers opt in explicitly (for `fx
- * test` that means `fx.tests.allowProjectExtensions: true`) to state that the
- * project's extensions are trusted.
+ * test` that means the user passes `--allow-project-extensions`) to state that
+ * the project's extensions are trusted for this run.
  *
  * The dispatch broker is a process-wide singleton; dropping its services keeps
  * one VM's extensions from logging a provider conflict for the next.

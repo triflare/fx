@@ -86,12 +86,21 @@ it with "fx feature tests enable".`,
       flags: "--timeout <ms>",
       description: "Per-test timeout in milliseconds",
     },
+    {
+      flags: "--allow-project-extensions",
+      description: "Trust and load this project's extensions for this run",
+    },
+    {
+      flags: "--allow-external-io",
+      description: "Allow network access (fetch and WebSocket) during tests",
+    },
   ],
   examples: [
     "fx test",
     "fx test test/score.test.tfx",
     "fx test --filter score --reporter verbose",
     "fx test --reporter junit",
+    "fx test --allow-project-extensions",
   ],
   jsonEvents: true,
   async run({ args, options, cwd, reporter, prompts }) {
@@ -130,6 +139,8 @@ it with "fx feature tests enable".`,
         extensionUrls: state.extensionUrls,
         seed: validateNumber(options.seed, "--seed"),
         timeout: validateNumber(options.timeout, "--timeout"),
+        allowProjectExtensions: Boolean(options.allowProjectExtensions),
+        allowExternalIO: Boolean(options.allowExternalIO),
         onEvent: testReporter.onEvent,
       });
     };

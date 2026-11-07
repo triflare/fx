@@ -38,6 +38,8 @@ function summarize(result) {
   lines.push(files, tests);
   if (counts.pending)
     lines.push(`${dim(true, "   Pending")}  ${yellow(true, counts.pending)}`);
+  if (counts.errors)
+    lines.push(`${dim(true, "    Errors")}  ${red(true, counts.errors)}`);
   const start = new Date(result.startTime);
   lines.push(
     `${dim(true, "   Start at")}  ${start.toLocaleTimeString([], {
@@ -53,14 +55,18 @@ function failureBlocks(result, dir) {
   const blocks = [];
   for (const file of result.files) {
     for (const test of file.tests) {
-      if (test.status !== "failed" || !test.error) continue;
+      if (test.status !== "failed" && test.status !== "error") continue;
+      if (!test.error) continue;
       const error = test.error;
+      // A test file is reported relative to the project, so resolve it before
+      // asking for a path relative to the project root.
       const where = error.file
         ? `${error.file}${error.line ? `:${error.line}:${error.column ?? 0}` : ""}`
-        : path.relative(dir, file.file);
+        : path.relative(dir, path.resolve(dir, file.file));
+      const label = test.status === "error" ? "ERROR" : "FAIL";
       blocks.push(
         [
-          red(true, `FAIL ${file.file} > ${test.name}`),
+          red(true, `${label} ${file.file} > ${test.name}`),
           `${error.name}: ${error.message}`,
           dim(true, `❯ ${where}`),
         ].join("\n"),
@@ -81,9 +87,21 @@ export function jsonReport(result, { events = [], warnings = [] } = {}) {
   };
 }
 
+/** Remove XML 1.0-forbidden C0 controls, keeping tab, newline and CR. */
+function stripInvalidXmlChars(text) {
+  return [...String(text)]
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return code === 0x9 || code === 0xa || code === 0xd || code >= 0x20;
+    })
+    .join("");
+}
+
 /** Escape text for use in JUnit attribute values and bodies. */
 function escapeXml(text) {
-  return String(text)
+  // Terminal color sequences in an error message must not make the report
+  // unparseable, even when their control characters are escaped.
+  return stripInvalidXmlChars(text)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -109,6 +127,11 @@ export function junitReport(result) {
           `    <testcase name="${escapeXml(test.name)}" classname="${escapeXml(file.file)}" time="${time}"><failure message="${escapeXml(message)}" type="${escapeXml(test.error?.name ?? "AssertionError")}">${escapeXml(
             `${test.error?.name ?? "Error"}: ${message}${test.error?.file ? `\n at ${test.error.file}:${test.error.line ?? 0}` : ""}`,
           )}</failure></testcase>`,
+        );
+      } else if (test.status === "error") {
+        const message = test.error?.message ?? "execution error";
+        lines.push(
+          `    <testcase name="${escapeXml(test.name)}" classname="${escapeXml(file.file)}" time="${time}"><error message="${escapeXml(message)}" type="${escapeXml(test.error?.name ?? "Error")}">${escapeXml(message)}</error></testcase>`,
         );
       } else if (test.status === "pending") {
         lines.push(
@@ -168,11 +191,10 @@ export function createTestReporter({
       case "discovered":
         if (name === "default") {
           for (const file of event.files)
-            write(
-              `  ${dim(color, "PENDING")}  ${file.file} (${file.tests.length} ${
-                file.tests.length === 1 ? "test" : "tests"
-              })\n`,
-            );
+            for (const test of file.tests)
+              write(
+                `  ${dim(color, "PENDING")}  ${file.file} > ${test.name}\n`,
+              );
         } else if (name === "verbose") {
           for (const file of event.files)
             for (const test of file.tests)
@@ -186,8 +208,13 @@ export function createTestReporter({
           write(
             `   ${dim(color, "▸")} ${event.file} > ${event.name} ${dim(color, event.status)}\n`,
           );
-        else if (tty && name === "default")
-          live(dim(color, `  ▸ ${event.file} > ${event.name}`));
+        else if (name === "default") {
+          if (tty) live(dim(color, `  ▸ ${event.file} > ${event.name}`));
+          else
+            write(
+              `  ${dim(color, "RUNNING")}  ${event.file} > ${event.name}\n`,
+            );
+        }
         break;
       case "test-result":
         clearLive();
@@ -200,6 +227,16 @@ export function createTestReporter({
                 : yellow(color, "↓");
           write(
             `   ${mark} ${event.name} ${dim(color, seconds(event.durationMs))}\n`,
+          );
+        } else if (name === "default") {
+          const mark =
+            event.status === "passed"
+              ? green(color, "✓")
+              : event.status === "failed" || event.status === "error"
+                ? red(color, "×")
+                : yellow(color, "↓");
+          write(
+            `  ${mark} ${event.file} > ${event.name} ${dim(color, seconds(event.durationMs))}\n`,
           );
         } else if (name === "dot")
           write(
@@ -249,9 +286,9 @@ export function createTestReporter({
         if (name === "default" || name === "verbose") {
           const blocks = failureBlocks(event.result, dir);
           if (blocks.length) {
-            write(
-              `\n${red(color, `⎯⎯⎯ Failed Tests ${event.result.counts.failed} ⎯⎯⎯`)}\n\n`,
-            );
+            const totalErrors =
+              event.result.counts.failed + (event.result.counts.errors ?? 0);
+            write(`\n${red(color, `⎯⎯⎯ Failed Tests ${totalErrors} ⎯⎯⎯`)}\n\n`);
             write(`${blocks.join("\n\n")}\n`);
           }
           for (const diagnostic of event.result.diagnostics)

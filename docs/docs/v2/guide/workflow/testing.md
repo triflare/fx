@@ -122,19 +122,19 @@ fx:
     timeout: 1000
     ticksPerSecond: 30
     failOnRuntimeError: true
-    allowProjectExtensions: false
 ```
 
-| Setting                  | What it does                                                     |
-| ------------------------ | ---------------------------------------------------------------- |
-| `pattern`                | Which files count as tests. The default is `test/**/*.test.tfx`. |
-| `seed`                   | Fixes randomness so runs repeat exactly.                         |
-| `timeout`                | How long one test may take, in milliseconds.                     |
-| `ticksPerSecond`         | How many frames one second of project time contains.             |
-| `failOnRuntimeError`     | Fails a test when the project reports an error.                  |
-| `allowProjectExtensions` | Runs the project's extensions during tests. Off by default.      |
+| Setting              | What it does                                                     |
+| -------------------- | ---------------------------------------------------------------- |
+| `pattern`            | Which files count as tests. The default is `test/**/*.test.tfx`. |
+| `seed`               | Fixes randomness so runs repeat exactly.                         |
+| `timeout`            | How long one test may take, in milliseconds.                     |
+| `ticksPerSecond`     | How many frames one second of project time contains.             |
+| `failOnRuntimeError` | Fails a test when the project reports an error.                  |
 
-Project extensions are ordinary JavaScript. There is no browser sandbox in a headless run, so loading one runs it in the same Node process as `fx test`, with access to the filesystem and the network. Tests do not load them unless `allowProjectExtensions` is `true`; without that opt-in, `fx test` stops with an error when the project configures extensions, even if no test calls their blocks. Only opt in for extensions you trust.
+Project extensions are ordinary JavaScript. There is no browser sandbox in a headless run, so loading one runs it in the same Node process as `fx test`, with access to the filesystem and the network. Tests do not load them unless the run opts in with `--allow-project-extensions`. That opt-in is deliberately an invocation option, not an `fx.yml` setting, so a cloned project cannot enable it for you. Without it, `fx test` stops with an error when the project configures extensions, even if no test calls their blocks.
+
+Only opt in after reviewing the extensions in a project you did not write. Trusting a project's extensions means running its code with the same access as the terminal command itself.
 
 ## Run tests
 
@@ -145,16 +145,20 @@ fx test --filter score
 fx test --watch
 ```
 
-| Option           | What it does                                          |
-| ---------------- | ----------------------------------------------------- |
-| `-t`, `--filter` | Runs only tests whose name or file contains the text. |
-| `-w`, `--watch`  | Runs again when you save a `.tfx` or `fx.yml` file.   |
-| `--run`          | Runs once and exits. This is the default.             |
-| `--reporter`     | `default`, `verbose`, `dot`, `json`, or `junit`.      |
-| `--seed`         | Uses a different seed for this run.                   |
-| `--timeout`      | Uses a different timeout for this run.                |
+| Option                       | What it does                                                  |
+| ---------------------------- | ------------------------------------------------------------- |
+| `-t`, `--filter`             | Runs only tests whose name or file contains the text.         |
+| `-w`, `--watch`              | Runs again when you save a `.tfx` or `fx.yml` file.           |
+| `--run`                      | Runs once and exits. This is the default.                     |
+| `--reporter`                 | `default`, `verbose`, `dot`, `json`, or `junit`.              |
+| `--seed`                     | Uses a different seed for this run.                           |
+| `--timeout`                  | Uses a different timeout for this run.                        |
+| `--allow-project-extensions` | Trusts and loads this project's extensions for this run.      |
+| `--allow-external-io`        | Allows network access (`fetch` and `WebSocket`) during tests. |
 
-The default reporter lists each file and collects failures at the end. `verbose` prints one line per test, `dot` prints one mark per test, `json` is for other tools, and `junit` writes XML for CI. Add `--no-color` for plain text.
+The default reporter lists every discovered test as pending, then shows it running and completed; `verbose` prints one line per test, `dot` prints one mark per test, `json` is for other tools, and `junit` writes XML for CI. Add `--no-color` for plain text.
+
+Network access through `fetch` and `WebSocket` is blocked by default so a test cannot call out to an external service by accident. Pass `--allow-external-io` for a run that needs it. This guard covers the VM's web APIs; it is not a sandbox for an extension you explicitly chose to trust.
 
 `fx test` exits with status 0 when every test passes, 1 when a test fails, 2 when a test file or setting has a problem, and 3 when you stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 

@@ -16,9 +16,13 @@ import {
   featureEnabled,
   updateFeature,
 } from "../src/features.js";
-import { runTests, TEST_EXIT } from "../src/test/runner.js";
-import { createTestReporter } from "../src/test/reporters.js";
-import { createVm } from "../src/vm.js";
+import {
+  installExternalIOGuard,
+  runTests,
+  TEST_EXIT,
+} from "../src/test/runner.js";
+import { createTestReporter, junitReport } from "../src/test/reporters.js";
+import { createStorage, createVm } from "../src/vm.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bin = path.join(root, "bin", "fx.js");
@@ -111,11 +115,11 @@ test("fx.tests accepts true, false and a mapping of overrides", () => {
   assert.equal(custom.timeout, 500);
   assert.equal(custom.failOnRuntimeError, false);
   assert.equal(custom.ticksPerSecond, DEFAULT_TESTS.ticksPerSecond);
-  assert.equal(DEFAULT_TESTS.allowProjectExtensions, false);
-  assert.equal(
-    parseConfig("fx:\n  tests:\n    allowProjectExtensions: true\n").fx.tests
-      .allowProjectExtensions,
-    true,
+  // Trust is an invocation option: a project cannot grant it to itself.
+  assert.equal(Object.hasOwn(DEFAULT_TESTS, "allowProjectExtensions"), false);
+  assert.throws(
+    () => parseConfig("fx:\n  tests:\n    allowProjectExtensions: true\n"),
+    /unknown fx.tests setting/,
   );
   assert.throws(
     () => parseConfig("fx:\n  tests:\n    nope: 1\n"),
@@ -485,6 +489,34 @@ test("reporters show discovered tests as pending, running and completed", async 
     assert.match(text, /▸ test\/score\.test\.tfx > passes running/);
     assert.match(text, /✓ passes/);
 
+    const renderDefault = async (tty) => {
+      const stream = memoryStream();
+      const defaultReporter = createTestReporter({
+        name: "default",
+        stream: stream.stream,
+        dir,
+        tty,
+      });
+      const run = await runTests({ dir, onEvent: defaultReporter.onEvent });
+      assert.equal(run.exitCode, TEST_EXIT.OK, JSON.stringify(run));
+      const rendered = stream.text();
+      assert.match(
+        rendered,
+        /PENDING\s+test\/score\.test\.tfx > passes/,
+        rendered,
+      );
+      assert.match(
+        rendered,
+        tty
+          ? /▸ test\/score\.test\.tfx > passes/
+          : /RUNNING\s+test\/score\.test\.tfx > passes/,
+        rendered,
+      );
+      assert.match(rendered, /✓ test\/score\.test\.tfx > passes/, rendered);
+    };
+    await renderDefault(false);
+    await renderDefault(true);
+
     const discovered = reporter.events.find(
       (event) => event.event === "discovered",
     );
@@ -536,6 +568,75 @@ test("fx test exit codes cover passing, failing, empty and invalid runs", () => 
   }
 });
 
+test("JUnit reports remove XML-forbidden control characters", () => {
+  const xml = junitReport({
+    durationMs: 1,
+    counts: { tests: 1, failed: 1, errors: 0 },
+    files: [
+      {
+        file: "test/a.test.tfx",
+        durationMs: 1,
+        tests: [
+          {
+            name: "fails",
+            status: "failed",
+            durationMs: 1,
+            error: {
+              name: "AssertionError",
+              message: "\u001b[31mfail & <bad>\u001b[0m",
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(xml.includes("\u001b"), false);
+  assert.match(xml, /fail &amp; &lt;bad&gt;/);
+});
+
+test("default reporter resolves relative test files for failure locations", () => {
+  const output = memoryStream();
+  const reporter = createTestReporter({
+    name: "default",
+    stream: output.stream,
+    dir: path.resolve("/project"),
+  });
+  reporter.onEvent({
+    event: "run-end",
+    result: {
+      startTime: new Date().toISOString(),
+      durationMs: 1,
+      files: [
+        {
+          file: "test/a.test.tfx",
+          durationMs: 1,
+          tests: [
+            {
+              name: "fails",
+              status: "failed",
+              durationMs: 1,
+              error: { name: "Error", message: "bad" },
+            },
+          ],
+        },
+      ],
+      diagnostics: [],
+      counts: {
+        files: 1,
+        passedFiles: 0,
+        failedFiles: 1,
+        errorFiles: 0,
+        tests: 1,
+        passed: 0,
+        failed: 1,
+        errors: 0,
+        pending: 0,
+      },
+    },
+  });
+  assert.match(output.text(), /❯ test\/a\.test\.tfx/);
+});
+
 test("JSON and JUnit reporters stay parseable when diagnostics occur", () => {
   const dir = tmpProject({ testSource: 'test "broken" { expect ; }\n' });
   try {
@@ -569,7 +670,6 @@ test("fx test loads configured feature extensions in the headless VM", () => {
             }
         }
     `,
-    tests: "\n    allowProjectExtensions: true",
     testSource: 'test "tempvars" { expect Player.counter() == 2; }\n',
   });
   try {
@@ -578,7 +678,7 @@ test("fx test loads configured feature extensions in the headless VM", () => {
       configDir: dir,
       name: "temporaryvariables",
     });
-    const result = run(["test"], dir);
+    const result = run(["test", "--allow-project-extensions"], dir);
     assert.equal(result.status, TEST_EXIT.OK, result.stdout + result.stderr);
     assert.match(result.stdout, /1 passed/);
   } finally {
@@ -586,7 +686,7 @@ test("fx test loads configured feature extensions in the headless VM", () => {
   }
 });
 
-test("project extensions are blocked during tests until the project opts in", async () => {
+test("project extensions require an explicit test-run opt-in", async () => {
   const extension = `
 class FxTestExtension {
   getInfo() {
@@ -601,7 +701,7 @@ Scratch.extensions.register(new FxTestExtension());
   try {
     fs.writeFileSync(path.join(dir, "ext.js"), extension);
     const configPath = path.join(dir, "fx.yml");
-    const writeConfig = (allow) =>
+    const writeConfig = (tests) =>
       fs.writeFileSync(
         configPath,
         `project:
@@ -609,22 +709,85 @@ Scratch.extensions.register(new FxTestExtension());
   extensions:
     - "./ext.js"
 fx:
-  tests:${allow ? "\n    allowProjectExtensions: true" : " true"}
+  tests:${tests}
 `,
       );
 
-    writeConfig(false);
+    writeConfig(" true");
     const blocked = await runTests({ dir });
     assert.equal(blocked.exitCode, TEST_EXIT.ERROR);
     assert.equal(blocked.counts.tests, 0);
-    assert.match(blocked.diagnostics[0].message, /allowProjectExtensions/);
+    assert.match(blocked.diagnostics[0].message, /allow-project-extensions/);
 
-    writeConfig(true);
-    const allowed = await runTests({ dir });
+    // Project configuration alone cannot grant trust, even if it copies the
+    // old setting name.
+    writeConfig("\n    allowProjectExtensions: true");
+    await assert.rejects(runTests({ dir }), /unknown fx.tests setting/);
+
+    writeConfig(" true");
+    const allowed = await runTests({ dir, allowProjectExtensions: true });
     assert.equal(allowed.exitCode, TEST_EXIT.OK, JSON.stringify(allowed));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("network access fails clearly while the test guard is active", async () => {
+  const originalFetch = globalThis.fetch;
+  const restore = installExternalIOGuard();
+  try {
+    assert.throws(
+      () => fetch("https://example.invalid/fx-test"),
+      /network access is blocked during fx test/i,
+    );
+    // Extension sources are data URLs, so the VM can still load them.
+    const response = await fetch("data:text/plain,ok");
+    assert.equal(await response.text(), "ok");
+  } finally {
+    restore();
+  }
+  assert.equal(globalThis.fetch, originalFetch);
+});
+
+test("a project load failure is an execution error, not a failed test", async () => {
+  const dir = tmpProject({
+    testSource: 'test "passes" { expect 1 == 1; }\n',
+  });
+  try {
+    // A syntax error prevents the extension script from loading at all, so the
+    // VM rejects while loading the built project.
+    const result = await runTests({
+      dir,
+      allowProjectExtensions: true,
+      catalog: {},
+      extensionUrls: {
+        broken: "data:text/javascript,this is not valid javascript",
+      },
+    });
+    assert.equal(result.exitCode, TEST_EXIT.ERROR, JSON.stringify(result));
+    assert.equal(result.counts.errors, 1);
+    assert.equal(result.counts.failed, 0);
+    const failed = result.files[0].tests[0];
+    assert.equal(failed.status, "error");
+    assert.match(failed.error.message, /could not load the project/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("asset text replacement updates data URIs and decoded text", () => {
+  const storage = createStorage();
+  const asset = storage.createAsset(
+    storage.AssetType.ImageVector,
+    "svg",
+    new Uint8Array([1, 2, 3]),
+  );
+  asset.encodeTextData("hello");
+  assert.equal(asset.decodeText(), "hello");
+  assert.equal(
+    asset.encodeDataURI(),
+    `data:svg;base64,${Buffer.from("hello").toString("base64")}`,
+  );
 });
 
 test("the headless VM denies project extensions until they are trusted", async () => {
@@ -778,8 +941,14 @@ test("simulated ticks advance project timers and waits", async () => {
       'test "clock" { start(); step(40); expect state.variable("elapsed") >= 1; expect state.variable("elapsed") < 1.4; }',
   });
   try {
+    const started = performance.now();
     const result = await runTests({ dir, ticksPerSecond: 30 });
+    const wallClockMs = performance.now() - started;
     assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
+    // More than a second of project time passed without sleeping in real time;
+    // only the timeout uses the wall clock.
+    assert.ok(wallClockMs < 2000, `test run took ${wallClockMs}ms`);
+    assert.ok(result.files[0].tests[0].ticks > 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

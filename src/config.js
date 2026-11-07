@@ -37,9 +37,6 @@ export const DEFAULT_TESTS = {
   ticksPerSecond: 30,
   failOnRuntimeError: true,
   parallel: false,
-  // Project extensions run unsandboxed in the test runner's Node process, so
-  // they only load when the project explicitly trusts them.
-  allowProjectExtensions: false,
 };
 
 /**
@@ -111,8 +108,6 @@ export function normalizeTestConfig(value) {
   }
   if (value.failOnRuntimeError != null)
     tests.failOnRuntimeError = Boolean(value.failOnRuntimeError);
-  if (value.allowProjectExtensions != null)
-    tests.allowProjectExtensions = Boolean(value.allowProjectExtensions);
   if (value.parallel != null) tests.parallel = Boolean(value.parallel);
   return tests;
 }

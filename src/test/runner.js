@@ -198,7 +198,12 @@ function createScope({ vm, config, seed, capture, deadline, warnings }) {
   };
 }
 
-/** Abort the test once its wall-clock budget is spent. */
+/**
+ * Abort the test once its wall-clock budget is spent.
+ *
+ * This is the only real-time mechanism in a test: `durationMs` is measurement,
+ * while `step()` and everything it advances use simulated time.
+ */
 function checkDeadline(scope) {
   if (performance.now() > scope.deadline)
     throw new TimeoutFailure(scope.config.timeout);
@@ -792,7 +797,8 @@ function assertExpectation(node, scope) {
  *
  * `runtime._step()` reads `currentMSecs`, so advancing it directly keeps
  * waits, timers and the tick counter deterministic and independent of the
- * real clock.
+ * real clock. Nothing here sleeps or waits on wall-clock time; the deadline
+ * check is the only place real time can stop a run.
  */
 function stepTicks(scope, count) {
   for (let index = 0; index < count; index += 1) {
@@ -900,15 +906,103 @@ function toError(result) {
   };
 }
 
+/** Network APIs tests may not use without an explicit opt-in. */
+const EXTERNAL_IO_APIS = ["fetch", "WebSocket"];
+
+/**
+ * Make network access fail clearly instead of reaching the host.
+ *
+ * The VM loads its own extension sources through `fetch`, so URLs the runner
+ * already resolved for this project remain readable; every other HTTP request
+ * is rejected. Extensions the user explicitly trusts still run with full Node
+ * access, so this covers the VM's web APIs rather than containing code the
+ * user chose to run. Every replaced property is restored after the test.
+ */
+export function installExternalIOGuard(extensionUrls = []) {
+  const allowed = new Set(extensionUrls);
+  const saved = [];
+  const originalFetch = globalThis.fetch;
+  const block = (name) => {
+    throw new TestError(
+      `External network access is blocked during fx test (${name}). ` +
+        'Pass "--allow-external-io" to allow it.',
+      { exitCode: TEST_EXIT.ERROR },
+    );
+  };
+
+  if (typeof originalFetch === "function") {
+    saved.push(["fetch", Object.getOwnPropertyDescriptor(globalThis, "fetch")]);
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: function guardedFetch(input, init) {
+        const url = typeof input === "string" ? input : input?.url;
+        const text = String(url ?? "");
+        if (allowed.has(text) || /^(data|blob|file):/i.test(text))
+          return originalFetch.call(globalThis, input, init);
+        return block("fetch");
+      },
+    });
+  }
+
+  for (const name of EXTERNAL_IO_APIS) {
+    if (name === "fetch") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+    if (!descriptor) continue;
+    saved.push([name, descriptor]);
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value: function blockedExternalIO() {
+        block(name);
+      },
+    });
+  }
+  return () => {
+    for (const [name, descriptor] of saved)
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+  };
+}
+
+/** Run one test with external I/O blocked unless the user allowed it. */
+async function runOneTest(options) {
+  const restoreExternalIO = options.config.allowExternalIO
+    ? () => {}
+    : installExternalIOGuard(Object.values(options.extensionUrls ?? {}));
+  try {
+    return await runOneTestInVm(options);
+  } finally {
+    restoreExternalIO();
+  }
+}
+
 /**
  * Run one test in a fresh VM and return its outcome.
  * @returns {Promise<object>} status, duration, ticks and any failure
  */
-async function runOneTest({ test, helpers, sb3, config, seed }) {
+async function runOneTestInVm({ test, helpers, sb3, config, seed }) {
   const started = performance.now();
-  const vm = await loadProject(sb3, {
-    allowProjectExtensions: config.allowProjectExtensions,
-  });
+  let vm;
+  try {
+    vm = await loadProject(sb3, {
+      allowProjectExtensions: config.allowProjectExtensions,
+    });
+  } catch (error) {
+    // A VM or extension load failure is an execution error, not a failed
+    // expectation, so it must not be counted as a test failure.
+    return {
+      name: test.name,
+      status: "error",
+      durationMs: Math.round(performance.now() - started),
+      ticks: 0,
+      seed,
+      error: {
+        name: error?.name ?? "ProjectLoadError",
+        message: `could not load the project: ${error?.message ?? String(error)}`,
+        ...locOf(test),
+      },
+    };
+  }
   vm.runtime.currentStepTime = 1000 / config.ticksPerSecond;
   // The sequencer refreshes this clock each frame; keep it on simulated time.
   vm.runtime.updateCurrentMSecs = () => {};
@@ -1050,6 +1144,8 @@ function describeFailure(error) {
  * @param {number} [options.timeout]
  * @param {number} [options.ticksPerSecond]
  * @param {boolean} [options.failOnRuntimeError]
+ * @param {boolean} [options.allowProjectExtensions] trust this project's extensions
+ * @param {boolean} [options.allowExternalIO] allow network access during tests
  * @param {(event: object) => void} [options.onEvent]
  * @returns {Promise<object>}
  */
@@ -1065,6 +1161,8 @@ export async function runTests({
   timeout,
   ticksPerSecond,
   failOnRuntimeError,
+  allowProjectExtensions = false,
+  allowExternalIO = false,
   onEvent = () => {},
 } = {}) {
   const started = performance.now();
@@ -1091,6 +1189,10 @@ export async function runTests({
       failOnRuntimeError ??
       settings.failOnRuntimeError ??
       DEFAULT_TESTS.failOnRuntimeError,
+    // Trust and network access belong to this invocation, never to the project
+    // configuration, so a cloned project cannot grant them to itself.
+    allowProjectExtensions: Boolean(allowProjectExtensions),
+    allowExternalIO: Boolean(allowExternalIO),
   };
 
   const discovered = files?.length
@@ -1115,9 +1217,11 @@ export async function runTests({
       files: discovered.length,
       passedFiles: 0,
       failedFiles: 0,
+      errorFiles: 0,
       tests: 0,
       passed: 0,
       failed: 0,
+      errors: 0,
       pending: 0,
     },
     ok: false,
@@ -1183,8 +1287,9 @@ export async function runTests({
 
   // A project extension is arbitrary JavaScript that would run with Node
   // process access in the VM, including its top-level code and configured
-  // extensions no test calls. Without an explicit opt-in, stop before running
-  // anything and say why instead of loading it or silently ignoring it.
+  // extensions no test calls. Without an explicit user opt-in, stop before
+  // running anything and say why instead of loading it or silently ignoring
+  // it. The opt-in is an invocation option, not an fx.yml setting.
   const projectExtensionUrls = extensions.extensionUrls ?? {};
   if (
     !config.allowProjectExtensions &&
@@ -1197,7 +1302,7 @@ export async function runTests({
         `Project extensions are blocked during fx test: ${ids
           .map((id) => JSON.stringify(id))
           .join(", ")}. ` +
-        'Set "fx.tests.allowProjectExtensions: true" in fx.yml to trust and load this project\'s extensions.',
+        'Pass "--allow-project-extensions" to trust and load this project\'s extensions for this run.',
     });
     result.exitCode = TEST_EXIT.ERROR;
     onEvent({ event: "diagnostic", ...result.diagnostics[0] });
@@ -1259,11 +1364,12 @@ export async function runTests({
           sb3: built.sb3,
           config,
           seed: config.seed,
+          extensionUrls: extensions.extensionUrls,
         });
       } catch (error) {
         outcome = {
           name: test.name,
-          status: "failed",
+          status: "error",
           durationMs: 0,
           ticks: 0,
           seed: config.seed,
@@ -1278,7 +1384,15 @@ export async function runTests({
       result.counts.tests += 1;
       if (outcome.status === "passed") result.counts.passed += 1;
       else if (outcome.status === "failed") result.counts.failed += 1;
-      else result.counts.pending += 1;
+      else if (outcome.status === "error") {
+        result.counts.errors += 1;
+        const diagnostic = {
+          file: file.file,
+          message: `${test.name}: ${outcome.error?.message ?? "test execution failed"}`,
+        };
+        result.diagnostics.push(diagnostic);
+        onEvent({ event: "diagnostic", ...diagnostic });
+      } else result.counts.pending += 1;
       onEvent({
         event: "test-result",
         file: file.file,
@@ -1287,11 +1401,14 @@ export async function runTests({
     }
 
     fileResult.durationMs = Math.round(performance.now() - fileStart);
-    if (fileResult.tests.some((item) => item.status === "failed"))
+    if (fileResult.tests.some((item) => item.status === "error"))
+      fileResult.status = "error";
+    else if (fileResult.tests.some((item) => item.status === "failed"))
       fileResult.status = "failed";
     result.files.push(fileResult);
     if (fileResult.status === "passed") result.counts.passedFiles += 1;
-    else result.counts.failedFiles += 1;
+    else if (fileResult.status === "failed") result.counts.failedFiles += 1;
+    else result.counts.errorFiles += 1;
     onEvent({
       event: "file-result",
       file: file.file,
@@ -1302,9 +1419,12 @@ export async function runTests({
   }
 
   result.durationMs = Math.round(performance.now() - started);
-  result.ok = result.counts.failed === 0 && result.counts.tests > 0;
+  result.ok =
+    result.counts.failed === 0 &&
+    result.counts.errors === 0 &&
+    result.counts.tests > 0;
   result.exitCode =
-    result.counts.tests === 0
+    result.counts.tests === 0 || result.counts.errors > 0
       ? TEST_EXIT.ERROR
       : result.counts.failed > 0
         ? TEST_EXIT.FAILED
