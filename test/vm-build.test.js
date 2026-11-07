@@ -40,8 +40,9 @@ test("VM marker tracks build inputs while retaining commit and version checks", 
      };`,
   );
   write("vendor/pm-vm/node_modules/@babel/preset-env/index.js", "");
-  const npm = write("tools/npm", "#!/bin/sh\nexit 0\n");
+  const npm = write("tools/npm", "#!/bin/sh\necho fixture npm\nexit 0\n");
   fs.chmodSync(npm, 0o755);
+  write("tools/npm.cmd", "@echo fixture npm\r\n@exit /b 0\r\n");
   execFileSync("git", ["init", "--quiet", root]);
   execFileSync("git", ["-C", root, "add", "."]);
   execFileSync("git", [
@@ -69,7 +70,9 @@ test("VM marker tracks build inputs while retaining commit and version checks", 
     return result.stdout;
   };
   const marker = () => JSON.parse(fs.readFileSync(markerFile, "utf8"));
-  assert.match(run(), /copied vm/);
+  const firstBuild = run();
+  assert.match(firstBuild, /copied vm/);
+  assert.equal(firstBuild.match(/fixture npm/g)?.length, 2);
   const originalHash = marker().inputHash;
   assert.match(originalHash, /^[a-f0-9]{64}$/);
   assert.match(run(), /is up to date/);
