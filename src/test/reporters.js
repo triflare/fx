@@ -111,13 +111,18 @@ function escapeXml(text) {
 
 /** JUnit XML for CI integrations. */
 export function junitReport(result) {
+  const errors = result.files.reduce(
+    (total, file) =>
+      total + file.tests.filter((test) => test.status === "error").length,
+    0,
+  );
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>'];
   lines.push(
-    `<testsuites name="fx" tests="${result.counts.tests}" failures="${result.counts.failed}" time="${(result.durationMs / 1000).toFixed(3)}">`,
+    `<testsuites name="fx" tests="${result.counts.tests}" failures="${result.counts.failed}" errors="${errors}" time="${(result.durationMs / 1000).toFixed(3)}">`,
   );
   for (const file of result.files) {
     lines.push(
-      `  <testsuite name="${escapeXml(file.file)}" tests="${file.tests.length}" failures="${file.tests.filter((t) => t.status === "failed").length}" time="${(file.durationMs / 1000).toFixed(3)}">`,
+      `  <testsuite name="${escapeXml(file.file)}" tests="${file.tests.length}" failures="${file.tests.filter((t) => t.status === "failed").length}" errors="${file.tests.filter((t) => t.status === "error").length}" time="${(file.durationMs / 1000).toFixed(3)}">`,
     );
     for (const test of file.tests) {
       const time = (test.durationMs / 1000).toFixed(3);
@@ -180,6 +185,7 @@ export function createTestReporter({
   };
 
   const onEvent = (event) => {
+    if (event.event === "run-start") events.length = 0;
     events.push(event);
     switch (event.event) {
       case "run-start":
@@ -222,7 +228,7 @@ export function createTestReporter({
           const mark =
             event.status === "passed"
               ? green(color, "✓")
-              : event.status === "failed"
+              : event.status === "failed" || event.status === "error"
                 ? red(color, "×")
                 : yellow(color, "↓");
           write(
@@ -242,7 +248,7 @@ export function createTestReporter({
           write(
             event.status === "passed"
               ? green(color, "·")
-              : event.status === "failed"
+              : event.status === "failed" || event.status === "error"
                 ? red(color, "×")
                 : yellow(color, "↓"),
           );
@@ -250,9 +256,12 @@ export function createTestReporter({
       case "file-result": {
         if (name !== "default" && name !== "verbose") break;
         const failed = event.tests.filter((test) => test.status === "failed");
-        const detail = failed.length
-          ? `${event.tests.length} tests | ${failed.length} failed`
-          : `${event.tests.length} ${event.tests.length === 1 ? "test" : "tests"}`;
+        const errors = event.tests.filter((test) => test.status === "error");
+        const detail = [
+          `${event.tests.length} ${event.tests.length === 1 ? "test" : "tests"}`,
+          ...(failed.length ? [`${failed.length} failed`] : []),
+          ...(errors.length ? [`${errors.length} errors`] : []),
+        ].join(" | ");
         const mark =
           event.status === "passed" ? green(color, "✓") : red(color, "×");
         write(

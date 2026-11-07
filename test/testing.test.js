@@ -22,7 +22,12 @@ import {
   TEST_EXIT,
 } from "../src/test/runner.js";
 import { createTestReporter, junitReport } from "../src/test/reporters.js";
-import { createStorage, createVm } from "../src/vm.js";
+import {
+  createStorage,
+  createVm,
+  loadProject,
+  loadVmModules,
+} from "../src/vm.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bin = path.join(root, "bin", "fx.js");
@@ -568,6 +573,66 @@ test("fx test exit codes cover passing, failing, empty and invalid runs", () => 
   }
 });
 
+test("reporters distinguish execution errors from assertion failures", () => {
+  const tests = ["passed", "failed", "error", "pending"].map((status) => ({
+    name: status,
+    status,
+    durationMs: 0,
+  }));
+  const files = [
+    { file: "a.test.tfx", tests, durationMs: 0 },
+    { file: "b.test.tfx", tests: [tests[2]], durationMs: 0 },
+  ];
+  const xml = junitReport({
+    files,
+    counts: { tests: 5, failed: 1, errors: 99 },
+    durationMs: 0,
+  });
+  assert.match(xml, /<testsuites name="fx" tests="5" failures="1" errors="2"/);
+  assert.match(
+    xml,
+    /<testsuite name="a.test.tfx" tests="4" failures="1" errors="1"/,
+  );
+  assert.match(
+    xml,
+    /<testsuite name="b.test.tfx" tests="1" failures="0" errors="1"/,
+  );
+  assert.equal((xml.match(/<error /g) ?? []).length, 2);
+  for (const name of ["default", "verbose", "dot"]) {
+    const output = memoryStream();
+    const reporter = createTestReporter({
+      name,
+      color: true,
+      stream: output.stream,
+    });
+    reporter.onEvent({ event: "test-result", ...tests[2] });
+    assert.ok(output.text().includes("\x1b[31m×\x1b[0m"));
+    reporter.onEvent({ event: "file-result", ...files[0], status: "error" });
+    if (name !== "dot")
+      assert.match(output.text(), /4 tests \| 1 failed \| 1 errors/);
+  }
+});
+
+test("JSON reporter retains only the current watch run", () => {
+  const output = memoryStream();
+  const reporter = createTestReporter({ name: "json", stream: output.stream });
+  for (const run of [1, 2]) {
+    reporter.onEvent({ event: "run-start", run });
+    reporter.onEvent({ event: "run-end", result: { ok: true } });
+  }
+  const documents = output
+    .text()
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    documents.map((doc) => doc.data.events.length),
+    [2, 2],
+  );
+  assert.equal(documents[1].data.events[0].run, 2);
+  assert.equal(reporter.events.length, 2);
+});
+
 test("JUnit reports remove XML-forbidden control characters", () => {
   const xml = junitReport({
     durationMs: 1,
@@ -736,8 +801,8 @@ test("network access fails clearly while the test guard is active", async () => 
   const originalFetch = globalThis.fetch;
   const restore = installExternalIOGuard();
   try {
-    assert.throws(
-      () => fetch("https://example.invalid/fx-test"),
+    await assert.rejects(
+      fetch("https://example.invalid/fx-test"),
       /network access is blocked during fx test/i,
     );
     // Extension sources are data URLs, so the VM can still load them.
@@ -747,6 +812,64 @@ test("network access fails clearly while the test guard is active", async () => 
     restore();
   }
   assert.equal(globalThis.fetch, originalFetch);
+});
+
+test("network guard applies the same rules to URL objects and Request inputs", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input) => {
+    calls.push(input);
+    return "allowed";
+  };
+  const extension = "https://example.invalid/extension.js";
+  const restore = installExternalIOGuard([extension]);
+  try {
+    for (const url of [
+      extension,
+      "data:text/plain,ok",
+      "blob:local",
+      "file:///local",
+    ]) {
+      for (const input of [url, new URL(url), { url }])
+        assert.equal(await fetch(input), "allowed");
+    }
+    for (const input of [
+      new URL("https://example.invalid/blocked"),
+      new Request("https://example.invalid/blocked"),
+    ])
+      await assert.rejects(fetch(input), /network access is blocked/);
+    assert.equal(calls.length, 12);
+  } finally {
+    restore();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("failed project loading stops the VM and preserves the load error", async () => {
+  const { VirtualMachine } = loadVmModules();
+  const originalLoad = VirtualMachine.prototype.loadProject;
+  const originalStop = VirtualMachine.prototype.stopAll;
+  const originalLog = console.log;
+  const error = new Error("load failed");
+  let stopped = 0;
+  VirtualMachine.prototype.loadProject = async () => {
+    throw error;
+  };
+  VirtualMachine.prototype.stopAll = () => {
+    stopped++;
+    throw new Error("cleanup failed");
+  };
+  try {
+    await assert.rejects(
+      loadProject(Buffer.alloc(0)),
+      (actual) => actual === error,
+    );
+    assert.equal(stopped, 1);
+    assert.equal(console.log, originalLog);
+  } finally {
+    VirtualMachine.prototype.loadProject = originalLoad;
+    VirtualMachine.prototype.stopAll = originalStop;
+  }
 });
 
 test("a project load failure is an execution error, not a failed test", async () => {
@@ -942,7 +1065,7 @@ test("simulated ticks advance project timers and waits", async () => {
   });
   try {
     const started = performance.now();
-    const result = await runTests({ dir, ticksPerSecond: 30 });
+    const result = await runTests({ dir, ticksPerSecond: 30, timeout: 5000 });
     const wallClockMs = performance.now() - started;
     assert.equal(result.exitCode, TEST_EXIT.OK, JSON.stringify(result));
     // More than a second of project time passed without sleeping in real time;

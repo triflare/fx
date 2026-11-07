@@ -935,8 +935,13 @@ export function installExternalIOGuard(extensionUrls = []) {
     Object.defineProperty(globalThis, "fetch", {
       configurable: true,
       writable: true,
-      value: function guardedFetch(input, init) {
-        const url = typeof input === "string" ? input : input?.url;
+      value: async function guardedFetch(input, init) {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input?.url;
         const text = String(url ?? "");
         if (allowed.has(text) || /^(data|blob|file):/i.test(text))
           return originalFetch.call(globalThis, input, init);

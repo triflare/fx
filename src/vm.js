@@ -311,6 +311,13 @@ export const loadProject = async (sb3, options = {}) => {
   console.log = () => {};
   try {
     await vm.loadProject(sb3);
+  } catch (error) {
+    try {
+      vm.stopAll();
+    } catch {
+      // Preserve the original load error if cleanup also fails.
+    }
+    throw error;
   } finally {
     console.log = log;
   }

@@ -160,7 +160,7 @@ The default reporter lists every discovered test as pending, then shows it runni
 
 Network access through `fetch` and `WebSocket` is blocked by default so a test cannot call out to an external service by accident. Pass `--allow-external-io` for a run that needs it. This guard covers the VM's web APIs; it is not a sandbox for an extension you explicitly chose to trust.
 
-`fx test` exits with status 0 when every test passes, 1 when a test fails, 2 when a test file or setting has a problem, and 3 when you stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+`fx test` exits with status 0 when every test passes, 1 when a test fails, 2 when a run has errors, matches no tests, testing is disabled, or a test file or setting has a problem, 3 when you stop it with <kbd>Ctrl</kbd>+<kbd>C</kbd>, and 4 for invalid command options, including unsupported `--reporter` values and invalid `--seed` or `--timeout` values.
 
 ## Repeatable runs
 
