@@ -69,8 +69,19 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function npm() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
+/**
+ * `npm` is a `.cmd` shim on Windows, which `execFileSync` cannot launch
+ * directly, so hand it to the command processor there.
+ * @returns {{command: string, args: string[]}}
+ */
+function npmLauncher() {
+  if (process.platform === "win32") {
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "npm"],
+    };
+  }
+  return { command: "npm", args: [] };
 }
 
 function installDependencies() {
@@ -81,12 +92,17 @@ function installDependencies() {
     "--no-package-lock",
     "--legacy-peer-deps",
   ];
+  const npm = npmLauncher();
   log("installing VM runtime dependencies");
-  run(npm(), ["install", "--omit=dev", ...shared], { cwd: SUBMODULE });
-  log("installing VM build tools");
-  run(npm(), ["install", "--no-save", ...shared, ...BUILD_DEPENDENCIES], {
+  run(npm.command, [...npm.args, "install", "--omit=dev", ...shared], {
     cwd: SUBMODULE,
   });
+  log("installing VM build tools");
+  run(
+    npm.command,
+    [...npm.args, "install", "--no-save", ...shared, ...BUILD_DEPENDENCIES],
+    { cwd: SUBMODULE },
+  );
 }
 
 /** @param {ReturnType<typeof createRequire>} requireFromVm */
