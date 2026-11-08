@@ -1,6 +1,6 @@
 // Triflare Fx "all blocks" showcase.
 //
-// Every built-in catalog block (all 116), plus the variable/list blocks that
+// Every built-in catalog block (all 248), plus the variable/list blocks that
 // the language emits directly and the custom-procedure forms, so that
 // `fx build examples/all-blocks` compiles the whole surface of the compiler.
 //
@@ -262,6 +262,185 @@ sprite "AllBlocks" {
         }
         items.deleteAll();
 
+        // ---- PenguinMod-only blocks -------------------------------------
+        control.backToGreenFlag();
+        control.decrementCounter();
+        control.deleteClonesOf("_myself_");
+        looks.say(control.ifReturnElseReturn(true, "yes", "no"));
+        control.javascriptCommand("console.log(1)");
+        control.repeatForSeconds(1) {
+            looks.show();
+        }
+        control.setCounter(0);
+        control.stopSprite("_stage_");
+        control.waitSecondsOrUntil(1, false);
+        control.waitTick();
+
+        looks.say(data.listAsArray(items));
+        data.setListFromArray(items, "[\"x\", \"y\"]");
+        if (data.itemExists(1, items)) {
+        }
+        if (data.listIsEmpty(items)) {
+        }
+        data.reverseList(items);
+        data.forEachItem(items, score) {
+            looks.show();
+        }
+        data.forEachIndex(items, score) {
+            looks.show();
+        }
+
+        looks.changeStretch(15, 0);
+        looks.changeVisibilityOf("show", "_myself_");
+        looks.hideSprite("_myself_");
+        looks.showSprite("_myself_");
+        looks.say(looks.effectValue("COLOR"));
+        if (looks.isSpriteVisible("_myself_")) {
+        }
+        if (looks.isVisible()) {
+        }
+        looks.say(looks.costumeInput("width", "idle"));
+        looks.goToTargetLayer("infront", "_myself_");
+        looks.say(looks.layer());
+        looks.setLayer(1);
+        looks.previousBackdrop();
+        looks.previousCostume();
+        looks.say(looks.sayHeight());
+        looks.say(looks.sayWidth());
+        looks.setBubbleColor("BUBBLE_STROKE", "#ff0000");
+        looks.setFont("Helvetica", 14);
+        looks.setTextBubbleShape("MIN_WIDTH", 0);
+        looks.setStretch(100, 100);
+        looks.setTintColor("#ff0000");
+        looks.stopTalking();
+        looks.say(looks.stretchX());
+        looks.say(looks.stretchY());
+        looks.say(looks.tintColor());
+
+        motion.changeByXY(10, 10);
+        motion.ifOnSpriteBounce("_mouse_");
+        motion.ifOnXYBounce(0, 0);
+        motion.moveToStageSide("bottom-left");
+        motion.moveBackSteps(10);
+        motion.moveUpDownSteps("up", 10);
+        motion.pointInRandomDirection();
+        motion.pointTowardsXY(0, 0);
+        motion.turnAround();
+        motion.turnLeftAroundXY(15, 0, 0);
+        motion.turnRightAroundXY(15, 0, 0);
+
+        looks.say(operators.advancedMath("^", 2, 3));
+        looks.say(operators.advancedMathExpanded("root", 2, 3, 16));
+        if (operators.boolify("true")) {
+        }
+        looks.say(operators.characterToCode("A"));
+        looks.say(operators.codeToCharacter(65));
+        looks.say(operators.constrain(50, 1, 100));
+        looks.say(operators.countAppearances("a", "banana"));
+        if (operators.falseValue()) {
+        }
+        looks.say(operators.lettersBetween(2, 4, "abcdef"));
+        looks.say(operators.lettersBetweenFixed(2, 4, "abcdef"));
+        if (operators.gte(2, 1)) {
+        }
+        looks.say(operators.indexOf("world", "Hello world!"));
+        if (operators.javascriptBoolean("true")) {
+        }
+        looks.say(operators.javascriptOutput("1 + 1"));
+        looks.say(operators.join3("a", "b", "c"));
+        looks.say(operators.lastIndexOf("o", "foo"));
+        looks.say(operators.interpolate(1, 3, 0.5));
+        if (operators.lte(1, 2)) {
+        }
+        if (operators.nand(true, false)) {
+        }
+        looks.say(operators.newLine());
+        if (operators.nor(false, false)) {
+        }
+        if (operators.notEqual(1, 2)) {
+        }
+        looks.say(operators.power(2, 3));
+        if (operators.randomBoolean()) {
+        }
+        looks.say(operators.readLine(1, "a\nb"));
+        looks.say(operators.regexMatch("foo bar", "foo", "g"));
+        looks.say(operators.replaceAll("foo bar", "foo", "baz"));
+        looks.say(operators.replaceFirst("bar bar", "bar", "foo"));
+        looks.say(operators.stringify("foo"));
+        looks.say(operators.tabCharacter());
+        if (operators.includesLetterFrom("abc", "bcd")) {
+        }
+        if (operators.startsWithOrEndsWith("starts", "abcdef", "abc")) {
+        }
+        looks.say(operators.toCase("upper", "hello"));
+        if (operators.trueValue()) {
+        }
+        if (operators.xnor(true, true)) {
+        }
+        if (operators.xor(true, false)) {
+        }
+
+        looks.say(sensing.directionBetween(-10, 10, 10, -10));
+        looks.say(sensing.distanceBetween(10, -10, -10, 10));
+        if (sensing.fingerDown("1")) {
+        }
+        if (sensing.fingerTapped("1")) {
+        }
+        looks.say(sensing.fingerX("1"));
+        looks.say(sensing.fingerY("1"));
+        looks.say(sensing.browser());
+        looks.say(sensing.clipboard());
+        if (sensing.isDraggable()) {
+        }
+        looks.say(sensing.operatingSystem());
+        looks.say(sensing.spriteWithAttribute("x position", "10"));
+        looks.say(sensing.url());
+        looks.say(sensing.touchingSpritePoint("x", "_mouse_"));
+        if (sensing.isUpperCase("A")) {
+        }
+        if (sensing.keyHit("space")) {
+        }
+        if (sensing.loggedIn()) {
+        }
+        if (sensing.isMobile()) {
+        }
+        if (sensing.mouseClicked()) {
+        }
+        if (sensing.mouseScrolling("up")) {
+        }
+        if (sensing.objectTouchingClone("_mouse_", "_myself_")) {
+        }
+        if (sensing.objectTouchingObject("_mouse_", "_myself_")) {
+        }
+        if (sensing.regexTest("foo bar", "foo", "g")) {
+        }
+        sensing.setClipboard("hi");
+        if (sensing.hasNumber("10")) {
+        }
+        if (sensing.isNumber("10")) {
+        }
+        if (sensing.isText("abc")) {
+        }
+
+        looks.say(sound.effectValue("PITCH"));
+        looks.say(sound.lengthOf("pop"));
+        looks.say(sound.soundVolume("pop"));
+        if (sound.isPlaying("pop")) {
+        }
+        sound.playAt("pop", 1);
+        sound.playAtUntilDone("pop", 1);
+        sound.playAllSounds();
+        sound.setFadeOut(1, "pop");
+        sound.stop("pop");
+
+        // Terminal loop blocks end their own stack inside the loop body.
+        control.repeat(1) {
+            control.continueLoop();
+        }
+        control.repeat(1) {
+            control.escapeLoop();
+        }
+
         // ---- custom procedures ------------------------------------------
         noop();
         bump(2, true);
@@ -299,6 +478,39 @@ sprite "AllBlocks" {
     }
 
     when broadcast("scene ping") {
+        looks.show();
+    }
+
+    // PenguinMod's compiler emits a missing closing parenthesis for the
+    // `operator_advlog` reporter, which makes the whole script fail to parse.
+    // Keep the block in a broadcast that is never sent: it still covers the
+    // catalog and decompiler without breaking the playable showcase.
+    when broadcast("advanced log (never sent)") {
+        looks.say(operators.advancedLog(8, 2));
+    }
+
+    // ---- the remaining PenguinMod-only hat events ----------------------
+    when always {
+        score += 0;
+    }
+
+    when whenAnything(true) {
+        looks.show();
+    }
+
+    when whenJavaScript("1 + 1") {
+        looks.show();
+    }
+
+    when whenKeyHit("space") {
+        looks.show();
+    }
+
+    when whenMouseScrolled("up") {
+        looks.show();
+    }
+
+    when whenStopClicked {
         looks.show();
     }
 

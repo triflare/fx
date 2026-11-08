@@ -30,7 +30,7 @@ test("the all-blocks showcase uses every catalog block", () => {
   );
   assert.equal(
     Object.values(CATALOG).filter((entry) => !entry.requiresExtension).length,
-    116,
+    248,
   );
 });
 
@@ -59,9 +59,30 @@ test("the all-blocks showcase loads through the PenguinMod runtime", async () =>
   assert.doesNotThrow(() => sprite.blocks.toXML(sprite.comments));
 });
 
+test("the all-blocks showcase compiles through the PenguinMod compiler", async () => {
+  const { sb3 } = build({ file: showcase });
+  const vm = await loadProject(sb3);
+  const errors = [];
+  vm.runtime.on("COMPILE_ERROR", (target, error) => {
+    errors.push(`${target.getName()}: ${error.message}`);
+  });
+  vm.setCompilerOptions({ enabled: true });
+  // Starting the green-flag hats compiles every script that can run from the
+  // showcase's entry point. The runtime's compiled-script generator reports
+  // malformed block metadata as a compile error instead of throwing.
+  vm.greenFlag();
+  vm.stopAll();
+  assert.deepEqual(errors, []);
+});
+
 test("every terminal block in the showcase has no trailing statements", () => {
   const { project } = build({ file: showcase });
-  const terminal = new Set(["procedures_return", "control_delete_this_clone"]);
+  const terminal = new Set([
+    "procedures_return",
+    "control_delete_this_clone",
+    "control_exitLoop",
+    "control_continueLoop",
+  ]);
   for (const target of project.targets) {
     for (const block of Object.values(target.blocks)) {
       if (terminal.has(block.opcode)) {

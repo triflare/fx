@@ -64,7 +64,7 @@
     "block-calls": {
       "patterns": [
         {
-          "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm|tempvars)(\\.)([A-Za-z_$][\\w$]*)",
+          "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm|tempvars|data)(\\.)([A-Za-z_$][\\w$]*)",
           "captures": {
             "1": { "name": "support.module.fx" },
             "2": { "name": "punctuation.accessor.fx" },
@@ -84,7 +84,7 @@
     "hat-events": {
       "patterns": [
         {
-          "match": "\\b(greenFlag|keyPressed|spriteClicked|stageClicked|cloneStart|broadcast|broadcastReceived|backdropSwitchesTo|loudnessGreaterThan|timerGreaterThan)\\b(?=\\s*[({]|\\s*$)",
+          "match": "\\b(greenFlag|keyPressed|spriteClicked|stageClicked|cloneStart|broadcast|broadcastReceived|backdropSwitchesTo|loudnessGreaterThan|timerGreaterThan|always|whenAnything|whenJavaScript|whenKeyHit|whenMouseScrolled|whenStopClicked)\\b(?=\\s*[({]|\\s*$)",
           "name": "support.function.hat.fx"
         }
       ]

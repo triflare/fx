@@ -18,7 +18,15 @@ const MENU_OPCODES = new Set([
   "looks_backdrops",
   "sound_sounds_menu",
   "control_create_clone_of_menu",
+  "control_stop_sprite_menu",
   "sensing_of_object_menu",
+  "sensing_fulltouchingobjectmenu",
+  "sensing_touchingobjectmenusprites",
+  "sensing_scrolldirections",
+  "sensing_fingeroptions",
+  "looks_changeVisibilityOfSprite_menu",
+  "looks_getOtherSpriteVisible_menu",
+  "looks_getinput_menu",
   "pen_menu_colorParam",
 ]);
 
@@ -50,6 +58,7 @@ const LIST_OPCODE_METHOD = {
 };
 
 const SAFE_TEMP_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SAFE_VAR_REF = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 function escapeString(value) {
   return String(value)
@@ -236,6 +245,12 @@ class Decompiler {
     }
     for (const [inputName, spec] of Object.entries(entry.inputs || {})) {
       if (spec.type === "substack") continue;
+      if (spec.type === "variable" || spec.type === "list") {
+        const field = (block.fields || {})[inputName];
+        const ref = field ? field[0] : "0";
+        args.push(SAFE_VAR_REF.test(ref) ? ref : `"${escapeString(ref)}"`);
+        continue;
+      }
       args.push(this.renderExpression(block.inputs[inputName]));
     }
     return `${name}(${args.join(", ")})`;
@@ -396,6 +411,18 @@ class Decompiler {
           option === "timer" ? "timerGreaterThan" : "loudnessGreaterThan";
         return `${pad}when ${kind}(${this.renderExpression(block.inputs.VALUE)}) {\n${body(block.next)}\n}`;
       }
+      case "event_always":
+        return `${pad}when always {\n${body(block.next)}\n}`;
+      case "event_whenanything":
+        return `${pad}when whenAnything(${this.renderExpression(block.inputs.ANYTHING)}) {\n${body(block.next)}\n}`;
+      case "event_whenjavascript":
+        return `${pad}when whenJavaScript(${this.renderExpression(block.inputs.JS)}) {\n${body(block.next)}\n}`;
+      case "event_whenkeyhit":
+        return `${pad}when whenKeyHit("${escapeString((block.fields.KEY_OPTION || ["space"])[0])}") {\n${body(block.next)}\n}`;
+      case "event_whenmousescrolled":
+        return `${pad}when whenMouseScrolled("${escapeString((block.fields.KEY_OPTION || ["up"])[0])}") {\n${body(block.next)}\n}`;
+      case "event_whenstopclicked":
+        return `${pad}when whenStopClicked {\n${body(block.next)}\n}`;
       default:
         return this.renderExtensionHat(block, pad, body);
     }
