@@ -84,10 +84,19 @@ Alias: `format`
 ### fx catalog
 
 ```bash
-fx catalog [<dir>] [--json]
+fx catalog [<dir>] [--category <name>] [--search <text>] [--json]
 ```
 
-Lists every block you can use, including blocks from extensions configured in `fx.yml`. Each line shows the block name, its PenguinMod opcode, and its kind. `--json` prints the same information as JSON.
+Lists every block you can use, grouped by category, including blocks from extensions configured in `fx.yml`. Each block shows its arguments in `SCREAMING_SNAKE_CASE`, the same style extensions use, so `motion.moveSteps(STEPS)` tells you what to pass.
+
+A one-character marker shows the kind of block: `→` returns a value, `?` is true/false, `▸` is an event, and a block with no marker is a command.
+
+| Option              | What it does                                   |
+| ------------------- | ---------------------------------------------- |
+| `--category <name>` | Shows one category, such as `motion` or `pen`. |
+| `--search <text>`   | Shows blocks whose name contains the text.     |
+
+`--verbose` also shows each block's PenguinMod opcode, kind, and extension. `--json` prints the same information as JSON, filtered like the text output.
 
 Aliases: `l`, `blocks`
 

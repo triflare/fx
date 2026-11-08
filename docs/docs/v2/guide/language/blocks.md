@@ -27,7 +27,14 @@ To list every block:
 fx catalog
 ```
 
-The output shows each block's name, the PenguinMod opcode it becomes, and its kind (`command`, `reporter`, `boolean`, or `hat`). To get the same list as JSON:
+The output groups blocks by category and shows each block's arguments, such as `motion.moveSteps(STEPS)`. A one-character marker shows the kind: `→` returns a value, `?` is true/false, `▸` is an event, and no marker means a command. To narrow the list, filter by category or name:
+
+```bash
+fx catalog --category motion
+fx catalog --search glide
+```
+
+Run `fx catalog --verbose` to see each block's PenguinMod opcode, kind, and extension. To get the same list as JSON:
 
 ```bash
 fx catalog --json
