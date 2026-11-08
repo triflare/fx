@@ -59,6 +59,40 @@ test("compiles a standalone source string with variables and list operations", (
   assert.ok(codes.includes("data_itemoflist"));
 });
 
+test("a list named data supports list methods and catalog calls", () => {
+  const { project } = compile(
+    parse(`
+    sprite "Bot" {
+      list data = ["a"];
+      when greenFlag {
+        data.push("b");
+        data.append("c");
+        looks.say(data.at(1));
+        data.reverseList(data);
+        looks.say(data.listAsArray(data));
+      }
+    }
+  `),
+  );
+  const codes = opcodes(project);
+  assert.equal(codes.filter((code) => code === "data_addtolist").length, 2);
+  assert.ok(codes.includes("data_itemoflist"));
+  assert.ok(codes.includes("data_reverselist"));
+  assert.ok(codes.includes("data_listarray"));
+  assert.throws(
+    () =>
+      compile(
+        parse(`
+      sprite "Bot" {
+        list data = [];
+        when greenFlag { data.unknown(); }
+      }
+    `),
+      ),
+    /Unknown list operation "unknown" on list "data"/,
+  );
+});
+
 test("marks returning procedures with a return mutation", () => {
   const ast = parse(
     `

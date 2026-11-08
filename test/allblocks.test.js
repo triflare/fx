@@ -72,6 +72,22 @@ test("the all-blocks showcase compiles through the PenguinMod compiler", async (
   // malformed block metadata as a compile error instead of throwing.
   vm.greenFlag();
   vm.stopAll();
+  for (const target of vm.runtime.targets) {
+    for (const id of target.blocks.getScripts()) {
+      const block = target.blocks.getBlock(id);
+      if (!vm.runtime.getIsHat(block.opcode)) continue;
+      if (block.opcode === "event_whenflagclicked") continue;
+      // PenguinMod cannot compile advancedLog yet; its dedicated broadcast
+      // remains isolated while every other event script is compiled directly.
+      if (
+        block.opcode === "event_whenbroadcastreceived" &&
+        block.fields.BROADCAST_OPTION.value === "advanced log (never sent)"
+      )
+        continue;
+      vm.runtime._pushThread(id, target);
+      vm.stopAll();
+    }
+  }
   assert.deepEqual(errors, []);
 });
 

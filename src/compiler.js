@@ -1039,14 +1039,19 @@ export class Compiler {
    */
   emitCall(ctx, node, parentId) {
     const segments = node.segments;
+    const entry = this.catalog[node.name];
 
     // List method: `items.push(x)`, `items.at(i)`, ...
     if (segments.length === 2) {
       const listInfo = ctx.resolveList(segments[0]);
-      if (listInfo) return this.emitListCall(ctx, node, listInfo, parentId);
+      const isListOperation = Object.entries(LIST_OPS).some(
+        ([name, spec]) =>
+          name === segments[1] || (spec.aliases || []).includes(segments[1]),
+      );
+      if (listInfo && (isListOperation || !entry))
+        return this.emitListCall(ctx, node, listInfo, parentId);
     }
 
-    const entry = this.catalog[node.name];
     if (entry) return this.emitCatalogCall(ctx, node, entry, parentId);
 
     if (segments.length === 1 && ctx.funcs.has(node.name)) {

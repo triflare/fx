@@ -313,7 +313,7 @@ Both blocks end their stack, so no statement can follow them in the same block. 
 | Block                                                                            | What it does                                     |
 | -------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `sensing.distanceBetween(x1, y1, x2, y2)`                                        | Returns the distance between two points.         |
-| `sensing.directionBetween(x1, y1, x2, y2)`                                       | Returns the direction between two points.        |
+| `sensing.directionBetween(x2, y2, x1, y1)`                                       | Returns the direction between two points.        |
 | `sensing.fingerDown(finger)` / `sensing.fingerTapped(finger)`                    | Reads multi-touch input.                         |
 | `sensing.fingerX(finger)` / `sensing.fingerY(finger)`                            | Returns a touch position.                        |
 | `sensing.mouseScrolling(direction)`                                              | Returns true while the mouse scrolls.            |
