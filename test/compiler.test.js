@@ -59,6 +59,78 @@ test("compiles a standalone source string with variables and list operations", (
   assert.ok(codes.includes("data_itemoflist"));
 });
 
+test("a list named data supports list methods and catalog calls", () => {
+  const { project } = compile(
+    parse(`
+    sprite "Bot" {
+      list data = ["a"];
+      when greenFlag {
+        data.push("b");
+        data.append("c");
+        looks.say(data.at(1));
+        data.reverseList(data);
+        looks.say(data.listAsArray(data));
+      }
+    }
+  `),
+  );
+  const codes = opcodes(project);
+  assert.equal(codes.filter((code) => code === "data_addtolist").length, 2);
+  assert.ok(codes.includes("data_itemoflist"));
+  assert.ok(codes.includes("data_reverselist"));
+  assert.ok(codes.includes("data_listarray"));
+  assert.throws(
+    () =>
+      compile(
+        parse(`
+      sprite "Bot" {
+        list data = [];
+        when greenFlag { data.unknown(); }
+      }
+    `),
+      ),
+    /Unknown list operation "unknown" on list "data"/,
+  );
+});
+
+test("a list named operators preserves catalog indexOf and list methods", () => {
+  const { project } = compile(
+    parse(`
+    sprite "Bot" {
+      list operators = ["a"];
+      list items = ["b"];
+      when greenFlag {
+        looks.say(operators.itemNumber("a"));
+        looks.say(operators.indexOf("world", "Hello world!"));
+        looks.say(items.indexOf("b"));
+        operators.append("c");
+      }
+    }
+  `),
+  );
+  const sprite = project.targets.find((target) => !target.isStage);
+  const blocks = Object.values(sprite.blocks);
+  const listCalls = blocks.filter(
+    (block) => block.opcode === "data_itemnumoflist",
+  );
+  assert.deepEqual(
+    listCalls.map((block) => [block.fields.LIST[0], block.inputs.ITEM]),
+    [
+      ["operators", [1, [10, "a"]]],
+      ["items", [1, [10, "b"]]],
+    ],
+  );
+  const catalogCall = blocks.find(
+    (block) => block.opcode === "operator_indexOfTextInText",
+  );
+  assert.ok(catalogCall);
+  assert.deepEqual(catalogCall.inputs.TEXT1, [1, [10, "world"]]);
+  assert.deepEqual(catalogCall.inputs.TEXT2, [1, [10, "Hello world!"]]);
+  const append = blocks.find((block) => block.opcode === "data_addtolist");
+  assert.equal(append.fields.LIST[0], "operators");
+  assert.deepEqual(append.inputs.ITEM, [1, [10, "c"]]);
+});
+
 test("marks returning procedures with a return mutation", () => {
   const ast = parse(
     `

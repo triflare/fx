@@ -45,6 +45,8 @@ const NUMBER_TYPES = {
 const TERMINAL_OPCODES = new Set([
   "procedures_return",
   "control_delete_this_clone",
+  "control_exitLoop",
+  "control_continueLoop",
 ]);
 
 let seed = 0n;
@@ -778,6 +780,9 @@ export class Compiler {
     if (block.opcode === "procedures_return") return "`return`";
     if (block.opcode === "control_delete_this_clone")
       return "`control.deleteThisClone()`";
+    if (block.opcode === "control_exitLoop") return "`control.escapeLoop()`";
+    if (block.opcode === "control_continueLoop")
+      return "`control.continueLoop()`";
     if (block.opcode === "control_stop") {
       const option = block.fields.STOP_OPTION
         ? block.fields.STOP_OPTION[0]
@@ -1034,14 +1039,17 @@ export class Compiler {
    */
   emitCall(ctx, node, parentId) {
     const segments = node.segments;
+    const entry = this.catalog[node.name];
 
     // List method: `items.push(x)`, `items.at(i)`, ...
     if (segments.length === 2) {
       const listInfo = ctx.resolveList(segments[0]);
-      if (listInfo) return this.emitListCall(ctx, node, listInfo, parentId);
+      // Canonical list methods take precedence; aliases resolve in emitListCall
+      // only when the name does not identify a catalog block.
+      if (listInfo && (Object.hasOwn(LIST_OPS, segments[1]) || !entry))
+        return this.emitListCall(ctx, node, listInfo, parentId);
     }
 
-    const entry = this.catalog[node.name];
     if (entry) return this.emitCatalogCall(ctx, node, entry, parentId);
 
     if (segments.length === 1 && ctx.funcs.has(node.name)) {
@@ -1098,6 +1106,33 @@ export class Compiler {
     for (const name of inputNames) {
       const spec = entry.inputs[name];
       if (spec.type === "substack") continue;
+      // Variable and list references are stored as fields in Scratch JSON
+      // even though they read as positional arguments in Fx source.
+      if (spec.type === "variable" || spec.type === "list") {
+        if (node.args[argIndex] === undefined)
+          this.fail(
+            `${node.name} requires a ${spec.type} name for ${name}`,
+            node.loc,
+          );
+        const refName = String(this.literalValue(node.args[argIndex]));
+        const resolved =
+          spec.type === "list"
+            ? ctx.resolveList(refName)
+            : ctx.resolveValue(refName);
+        if (
+          !resolved ||
+          (spec.type === "list"
+            ? resolved.kind !== "list"
+            : resolved.kind !== "var")
+        )
+          this.fail(
+            `Unknown ${spec.type} ${JSON.stringify(refName)} for ${node.name}`,
+            node.loc,
+          );
+        fields[name] = [resolved.name, resolved.id];
+        argIndex += 1;
+        continue;
+      }
       if (node.args[argIndex] !== undefined) {
         inputs[name] = this.buildInputForSpec(spec, node.args[argIndex], id);
         argIndex += 1;

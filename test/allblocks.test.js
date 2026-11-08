@@ -30,7 +30,7 @@ test("the all-blocks showcase uses every catalog block", () => {
   );
   assert.equal(
     Object.values(CATALOG).filter((entry) => !entry.requiresExtension).length,
-    116,
+    248,
   );
 });
 
@@ -59,9 +59,46 @@ test("the all-blocks showcase loads through the PenguinMod runtime", async () =>
   assert.doesNotThrow(() => sprite.blocks.toXML(sprite.comments));
 });
 
+test("the all-blocks showcase compiles through the PenguinMod compiler", async () => {
+  const { sb3 } = build({ file: showcase });
+  const vm = await loadProject(sb3);
+  const errors = [];
+  vm.runtime.on("COMPILE_ERROR", (target, error) => {
+    errors.push(`${target.getName()}: ${error.message}`);
+  });
+  vm.setCompilerOptions({ enabled: true });
+  // Starting the green-flag hats compiles every script that can run from the
+  // showcase's entry point. The runtime's compiled-script generator reports
+  // malformed block metadata as a compile error instead of throwing.
+  vm.greenFlag();
+  vm.stopAll();
+  for (const target of vm.runtime.targets) {
+    for (const id of target.blocks.getScripts()) {
+      const block = target.blocks.getBlock(id);
+      if (!vm.runtime.getIsHat(block.opcode)) continue;
+      if (block.opcode === "event_whenflagclicked") continue;
+      // PenguinMod cannot compile advancedLog yet; its dedicated broadcast
+      // remains isolated while every other event script is compiled directly.
+      if (
+        block.opcode === "event_whenbroadcastreceived" &&
+        block.fields.BROADCAST_OPTION.value === "advanced log (never sent)"
+      )
+        continue;
+      vm.runtime._pushThread(id, target);
+      vm.stopAll();
+    }
+  }
+  assert.deepEqual(errors, []);
+});
+
 test("every terminal block in the showcase has no trailing statements", () => {
   const { project } = build({ file: showcase });
-  const terminal = new Set(["procedures_return", "control_delete_this_clone"]);
+  const terminal = new Set([
+    "procedures_return",
+    "control_delete_this_clone",
+    "control_exitLoop",
+    "control_continueLoop",
+  ]);
   for (const target of project.targets) {
     for (const block of Object.values(target.blocks)) {
       if (terminal.has(block.opcode)) {

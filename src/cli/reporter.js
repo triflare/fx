@@ -8,6 +8,7 @@
 
 import { styleText } from "node:util";
 import { brandText } from "../brand.js";
+import { formatColumns } from "./format.js";
 import { createTheme } from "./theme.js";
 
 const STATUS = {
@@ -143,6 +144,13 @@ export function createReporter({
       const detail = value ? ` ${value}` : "";
       const note = suffix ? ` ${theme.muted(suffix)}` : "";
       stdout.write(`  ${theme.accent(padded)}${detail}${note}\n`);
+    },
+
+    /** Compact multi-column rows for long block and file listings. */
+    columns(items, { width = 80, indent = 2, gap = 2 } = {}) {
+      if (!human) return;
+      for (const line of formatColumns(items, { width, indent, gap }))
+        stdout.write(`${line}\n`);
     },
 
     /** Plain block of text with no decoration. */

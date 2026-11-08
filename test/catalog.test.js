@@ -26,6 +26,14 @@ const MENU_FIELDS = {
   looks_backdrops: "BACKDROP",
   sound_sounds_menu: "SOUND_MENU",
   control_create_clone_of_menu: "CLONE_OPTION",
+  control_stop_sprite_menu: "STOP_OPTION",
+  looks_changeVisibilityOfSprite_menu: "VISIBLE_OPTION",
+  looks_getOtherSpriteVisible_menu: "VISIBLE_OPTION",
+  looks_getinput_menu: "INPUT",
+  sensing_fulltouchingobjectmenu: "FULLTOUCHINGOBJECTMENU",
+  sensing_touchingobjectmenusprites: "SPRITETOUCHINGOBJECTMENU",
+  sensing_scrolldirections: "SCROLL_OPTION",
+  sensing_fingeroptions: "FINGER_OPTION",
   pen_menu_colorParam: "colorParam",
 };
 

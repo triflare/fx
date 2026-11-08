@@ -291,3 +291,69 @@ test("sprite remove refuses a sprite that shares a file", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("catalog groups blocks with kind markers and arguments", () => {
+  const dir = project();
+  try {
+    const result = run(["catalog"], dir);
+    assert.equal(result.status, 0, result.stderr);
+    const out = result.stdout;
+    assert.match(out, /catalog — \d+ blocks in \d+ groups/);
+    assert.match(out, /^ {2}motion · \d+$/m);
+    assert.match(out, /motion\.moveSteps\(STEPS\)/);
+    assert.match(out, /operators\.replaceAll\(TEXT, TERM, RES\)/);
+    assert.match(out, /→ looks\.size\(\)/);
+    assert.match(out, /→ pm\.lastKeyPressed\(\)/);
+    assert.match(out, /\? sensing\.mouseDown\(\)/);
+    assert.match(out, /▸ events\.greenFlag\(\)/);
+    assert.ok(!out.includes("->"), "opcodes are hidden by default");
+    assert.ok(!out.includes("[command]"), "kinds are hidden by default");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("catalog filters by search and category", () => {
+  const dir = project();
+  try {
+    const search = run(["catalog", "--search", "glide"], dir);
+    assert.equal(search.status, 0, search.stderr);
+    assert.match(search.stdout, /2 blocks matching "glide"/);
+    assert.match(search.stdout, /motion\.glideTo\(SECS, TO\)/);
+    assert.match(search.stdout, /motion\.glideToXY\(SECS, X, Y\)/);
+    assert.ok(!search.stdout.includes("motion.moveSteps"));
+
+    const category = run(["catalog", "--category", "control"], dir);
+    assert.equal(category.status, 0, category.stderr);
+    assert.match(category.stdout, /22 blocks · control/);
+    assert.match(category.stdout, /control\.escapeLoop\(\)/);
+    assert.ok(!category.stdout.includes("motion."));
+
+    const empty = run(["catalog", "--search", "zzz"], dir);
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.match(empty.stdout, /No blocks match --search "zzz"/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("catalog verbose output and JSON keep the technical detail", () => {
+  const dir = project();
+  try {
+    const verbose = run(["catalog", "--search", "glide", "--verbose"], dir);
+    assert.equal(verbose.status, 0, verbose.stderr);
+    assert.match(verbose.stdout, /motion\.glideTo\(SECS, TO\)/);
+    assert.match(verbose.stdout, /-> motion_glideto \[command\]/);
+
+    const json = run(["catalog", "--search", "glide", "--json"], dir);
+    assert.equal(json.status, 0, json.stderr);
+    const payload = JSON.parse(json.stdout);
+    assert.equal(payload.ok, true);
+    assert.deepEqual(Object.keys(payload.data), [
+      "motion.glideTo",
+      "motion.glideToXY",
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

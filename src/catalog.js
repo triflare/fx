@@ -102,6 +102,59 @@ const OF_MENU = {
   field: "OBJECT",
   default: "_stage_",
 };
+const SPRITE_STOP_MENU = {
+  type: "menu",
+  menu: "control_stop_sprite_menu",
+  field: "STOP_OPTION",
+  default: "_stage_",
+};
+const VISIBILITY_MENU = {
+  type: "menu",
+  menu: "looks_changeVisibilityOfSprite_menu",
+  field: "VISIBLE_OPTION",
+  default: "_myself_",
+};
+const OTHER_VISIBILITY_MENU = {
+  type: "menu",
+  menu: "looks_getOtherSpriteVisible_menu",
+  field: "VISIBLE_OPTION",
+  default: "_myself_",
+};
+const COSTUME_INPUT_MENU = {
+  type: "menu",
+  menu: "looks_getinput_menu",
+  field: "INPUT",
+  default: "width",
+};
+const FULL_TOUCHING_MENU = {
+  type: "menu",
+  menu: "sensing_fulltouchingobjectmenu",
+  field: "FULLTOUCHINGOBJECTMENU",
+  default: "_mouse_",
+};
+const SPRITE_TOUCHING_MENU = {
+  type: "menu",
+  menu: "sensing_touchingobjectmenusprites",
+  field: "SPRITETOUCHINGOBJECTMENU",
+  default: "_myself_",
+};
+const SCROLL_MENU = {
+  type: "menu",
+  menu: "sensing_scrolldirections",
+  field: "SCROLL_OPTION",
+  default: "up",
+};
+const FINGER_MENU = {
+  type: "menu",
+  menu: "sensing_fingeroptions",
+  field: "FINGER_OPTION",
+  default: "1",
+};
+
+// Variable and list references are serialized as *fields*, not inputs, but
+// they occupy a positional argument in the Fx call like any other input.
+const VAR_REF = { type: "variable" };
+const LIST_REF = { type: "list" };
 
 const CORE_CATALOG = {
   // ---------------------------------------------------------------- motion
@@ -712,6 +765,867 @@ const CORE_CATALOG = {
     kind: "reporter",
     extension: "fxTempVars",
     requiresExtension: true,
+  },
+  // ---- control (PenguinMod) --------------------------------------------
+  "control.backToGreenFlag": {
+    opcode: "control_backToGreenFlag",
+  },
+  "control.continueLoop": {
+    opcode: "control_continueLoop",
+  },
+  "control.decrementCounter": {
+    opcode: "control_decr_counter",
+  },
+  "control.deleteClonesOf": {
+    opcode: "control_delete_clones_of",
+    inputs: {
+      CLONE_OPTION: CLONE_MENU,
+    },
+  },
+  "control.escapeLoop": {
+    opcode: "control_exitLoop",
+  },
+  "control.ifReturnElseReturn": {
+    opcode: "control_if_return_else_return",
+    kind: "reporter",
+    inputs: {
+      boolean: BOOLEAN,
+      TEXT1: STRING,
+      TEXT2: STRING,
+    },
+  },
+  "control.javascriptCommand": {
+    opcode: "control_javascript_command",
+    inputs: {
+      JS: STRING,
+    },
+  },
+  "control.repeatForSeconds": {
+    opcode: "control_repeatForSeconds",
+    inputs: {
+      TIMES: POSITIVE,
+      SUBSTACK: SUBSTACK,
+    },
+  },
+  "control.setCounter": {
+    opcode: "control_set_counter",
+    inputs: {
+      VALUE: NUMBER,
+    },
+  },
+  "control.stopSprite": {
+    opcode: "control_stop_sprite",
+    inputs: {
+      STOP_OPTION: SPRITE_STOP_MENU,
+    },
+  },
+  "control.waitSecondsOrUntil": {
+    opcode: "control_waitsecondsoruntil",
+    inputs: {
+      DURATION: POSITIVE,
+      CONDITION: BOOLEAN,
+    },
+  },
+  "control.waitTick": {
+    opcode: "control_waittick",
+  },
+
+  // ---- data (PenguinMod) --------------------------------------------
+  "data.setListFromArray": {
+    opcode: "data_arraylist",
+    inputs: {
+      LIST: LIST_REF,
+      VALUE: STRING,
+    },
+  },
+  "data.itemExists": {
+    opcode: "data_itemexistslist",
+    kind: "boolean",
+    inputs: {
+      INDEX: WHOLE,
+      LIST: LIST_REF,
+    },
+  },
+  "data.listAsArray": {
+    opcode: "data_listarray",
+    kind: "reporter",
+    inputs: {
+      LIST: LIST_REF,
+    },
+  },
+  "data.forEachItem": {
+    opcode: "data_listforeachitem",
+    inputs: {
+      LIST: LIST_REF,
+      VARIABLE: VAR_REF,
+      SUBSTACK: SUBSTACK,
+    },
+  },
+  "data.forEachIndex": {
+    opcode: "data_listforeachnum",
+    inputs: {
+      LIST: LIST_REF,
+      VARIABLE: VAR_REF,
+      SUBSTACK: SUBSTACK,
+    },
+  },
+  "data.listIsEmpty": {
+    opcode: "data_listisempty",
+    kind: "boolean",
+    inputs: {
+      LIST: LIST_REF,
+    },
+  },
+  "data.reverseList": {
+    opcode: "data_reverselist",
+    inputs: {
+      LIST: LIST_REF,
+    },
+  },
+
+  // ---- events (PenguinMod) --------------------------------------------
+  "events.always": {
+    opcode: "event_always",
+    kind: "hat",
+    args: [],
+  },
+  "events.whenAnything": {
+    opcode: "event_whenanything",
+    kind: "hat",
+    args: [{ input: "ANYTHING", type: "boolean" }],
+  },
+  "events.whenJavaScript": {
+    opcode: "event_whenjavascript",
+    kind: "hat",
+    args: [{ input: "JS", type: "string" }],
+  },
+  "events.whenKeyHit": {
+    opcode: "event_whenkeyhit",
+    kind: "hat",
+    args: [{ field: "KEY_OPTION", default: "space" }],
+  },
+  "events.whenMouseScrolled": {
+    opcode: "event_whenmousescrolled",
+    kind: "hat",
+    args: [{ field: "KEY_OPTION", default: "up" }],
+  },
+  "events.whenStopClicked": {
+    opcode: "event_whenstopclicked",
+    kind: "hat",
+    args: [],
+  },
+
+  // ---- looks (PenguinMod) --------------------------------------------
+  "looks.changeStretch": {
+    opcode: "looks_changeStretch",
+    inputs: {
+      X: NUMBER,
+      Y: NUMBER,
+    },
+  },
+  "looks.changeVisibilityOf": {
+    opcode: "looks_changeVisibilityOfSprite",
+    fields: { VISIBLE_TYPE: "show" },
+    inputs: {
+      VISIBLE_OPTION: VISIBILITY_MENU,
+    },
+  },
+  "looks.hideSprite": {
+    opcode: "looks_changeVisibilityOfSpriteHide",
+    inputs: {
+      VISIBLE_OPTION: VISIBILITY_MENU,
+    },
+  },
+  "looks.showSprite": {
+    opcode: "looks_changeVisibilityOfSpriteShow",
+    inputs: {
+      VISIBLE_OPTION: VISIBILITY_MENU,
+    },
+  },
+  "looks.effectValue": {
+    opcode: "looks_getEffectValue",
+    kind: "reporter",
+    fields: { EFFECT: "COLOR" },
+  },
+  "looks.isSpriteVisible": {
+    opcode: "looks_getOtherSpriteVisible",
+    kind: "boolean",
+    inputs: {
+      VISIBLE_OPTION: OTHER_VISIBILITY_MENU,
+    },
+  },
+  "looks.isVisible": {
+    opcode: "looks_getSpriteVisible",
+    kind: "boolean",
+  },
+  "looks.costumeInput": {
+    opcode: "looks_getinputofcostume",
+    kind: "reporter",
+    inputs: {
+      INPUT: COSTUME_INPUT_MENU,
+      COSTUME: COSTUME_MENU,
+    },
+  },
+  "looks.goToTargetLayer": {
+    opcode: "looks_goTargetLayer",
+    fields: { FORWARD_BACKWARD: "infront" },
+    inputs: {
+      VISIBLE_OPTION: OTHER_VISIBILITY_MENU,
+    },
+  },
+  "looks.layer": {
+    opcode: "looks_layersGetLayer",
+    kind: "reporter",
+  },
+  "looks.setLayer": {
+    opcode: "looks_layersSetLayer",
+    inputs: {
+      NUM: INTEGER,
+    },
+  },
+  "looks.previousBackdrop": {
+    opcode: "looks_previousbackdrop",
+  },
+  "looks.previousCostume": {
+    opcode: "looks_previouscostume",
+  },
+  "looks.sayHeight": {
+    opcode: "looks_sayHeight",
+    kind: "reporter",
+  },
+  "looks.sayWidth": {
+    opcode: "looks_sayWidth",
+    kind: "reporter",
+  },
+  "looks.setBubbleColor": {
+    opcode: "looks_setColor",
+    fields: { prop: "BUBBLE_STROKE" },
+    inputs: {
+      color: COLOR,
+    },
+  },
+  "looks.setFont": {
+    opcode: "looks_setFont",
+    inputs: {
+      font: { type: "string", default: "Helvetica" },
+      size: { type: "number", default: "14" },
+    },
+  },
+  "looks.setTextBubbleShape": {
+    opcode: "looks_setShape",
+    fields: { prop: "MIN_WIDTH" },
+    inputs: {
+      color: NUMBER,
+    },
+  },
+  "looks.setStretch": {
+    opcode: "looks_setStretch",
+    inputs: {
+      X: NUMBER,
+      Y: NUMBER,
+    },
+  },
+  "looks.setTintColor": {
+    opcode: "looks_setTintColor",
+    inputs: {
+      color: COLOR,
+    },
+  },
+  "looks.stopTalking": {
+    opcode: "looks_stoptalking",
+  },
+  "looks.stretchX": {
+    opcode: "looks_stretchGetX",
+    kind: "reporter",
+  },
+  "looks.stretchY": {
+    opcode: "looks_stretchGetY",
+    kind: "reporter",
+  },
+  "looks.tintColor": {
+    opcode: "looks_tintColor",
+    kind: "reporter",
+  },
+
+  // ---- motion (PenguinMod) --------------------------------------------
+  "motion.changeByXY": {
+    opcode: "motion_changebyxy",
+    inputs: {
+      DX: NUMBER,
+      DY: NUMBER,
+    },
+  },
+  "motion.ifOnSpriteBounce": {
+    opcode: "motion_ifonspritebounce",
+    inputs: {
+      SPRITE: POINT_MENU,
+    },
+  },
+  "motion.ifOnXYBounce": {
+    opcode: "motion_ifonxybounce",
+    inputs: {
+      X: NUMBER,
+      Y: NUMBER,
+    },
+  },
+  "motion.moveToStageSide": {
+    opcode: "motion_move_sprite_to_scene_side",
+    fields: { ALIGNMENT: "bottom-left" },
+  },
+  "motion.moveBackSteps": {
+    opcode: "motion_movebacksteps",
+    inputs: {
+      STEPS: NUMBER,
+    },
+  },
+  "motion.moveUpDownSteps": {
+    opcode: "motion_moveupdownsteps",
+    fields: { DIRECTION: "up" },
+    inputs: {
+      STEPS: NUMBER,
+    },
+  },
+  "motion.pointInRandomDirection": {
+    opcode: "motion_pointinrandomdirection",
+  },
+  "motion.pointTowardsXY": {
+    opcode: "motion_pointtowardsxy",
+    inputs: {
+      X: NUMBER,
+      Y: NUMBER,
+    },
+  },
+  "motion.turnAround": {
+    opcode: "motion_turnaround",
+  },
+  "motion.turnLeftAroundXY": {
+    opcode: "motion_turnleftaroundxy",
+    inputs: {
+      DEGREES: NUMBER,
+      X: NUMBER,
+      Y: NUMBER,
+    },
+  },
+  "motion.turnRightAroundXY": {
+    opcode: "motion_turnrightaroundxy",
+    inputs: {
+      DEGREES: NUMBER,
+      X: NUMBER,
+      Y: NUMBER,
+    },
+  },
+
+  // ---- operators (PenguinMod) --------------------------------------------
+  "operators.advancedMath": {
+    opcode: "operator_advMath",
+    kind: "reporter",
+    fields: { OPTION: "^" },
+    inputs: {
+      ONE: NUMBER,
+      TWO: NUMBER,
+    },
+  },
+  "operators.advancedMathExpanded": {
+    opcode: "operator_advMathExpanded",
+    kind: "reporter",
+    fields: { OPTION: "root" },
+    inputs: {
+      ONE: NUMBER,
+      TWO: NUMBER,
+      THREE: NUMBER,
+    },
+  },
+  "operators.advancedLog": {
+    opcode: "operator_advlog",
+    kind: "reporter",
+    inputs: {
+      NUM1: NUMBER,
+      NUM2: NUMBER,
+    },
+  },
+  "operators.boolify": {
+    opcode: "operator_boolify",
+    kind: "boolean",
+    inputs: {
+      ONE: STRING,
+    },
+  },
+  "operators.characterToCode": {
+    opcode: "operator_character_to_code",
+    kind: "reporter",
+    inputs: {
+      ONE: STRING,
+    },
+  },
+  "operators.codeToCharacter": {
+    opcode: "operator_code_to_character",
+    kind: "reporter",
+    inputs: {
+      ONE: NUMBER,
+    },
+  },
+  "operators.constrain": {
+    opcode: "operator_constrainnumber",
+    kind: "reporter",
+    inputs: {
+      inp: NUMBER,
+      min: NUMBER,
+      max: NUMBER,
+    },
+  },
+  "operators.countAppearances": {
+    opcode: "operator_countAppearTimes",
+    kind: "reporter",
+    inputs: {
+      TEXT1: STRING,
+      TEXT2: STRING,
+    },
+  },
+  "operators.falseValue": {
+    opcode: "operator_falseBoolean",
+    kind: "boolean",
+  },
+  "operators.lettersBetween": {
+    opcode: "operator_getLettersFromIndexToIndexInText",
+    kind: "reporter",
+    inputs: {
+      INDEX1: NUMBER,
+      INDEX2: NUMBER,
+      TEXT: STRING,
+    },
+  },
+  "operators.lettersBetweenFixed": {
+    opcode: "operator_getLettersFromIndexToIndexInTextFixed",
+    kind: "reporter",
+    inputs: {
+      INDEX1: NUMBER,
+      INDEX2: NUMBER,
+      TEXT: STRING,
+    },
+  },
+  "operators.gte": {
+    opcode: "operator_gtorequal",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: STRING,
+      OPERAND2: STRING,
+    },
+  },
+  "operators.indexOf": {
+    opcode: "operator_indexOfTextInText",
+    kind: "reporter",
+    inputs: {
+      TEXT1: STRING,
+      TEXT2: STRING,
+    },
+  },
+  "operators.javascriptBoolean": {
+    opcode: "operator_javascript_boolean",
+    kind: "boolean",
+    inputs: {
+      JS: STRING,
+    },
+  },
+  "operators.javascriptOutput": {
+    opcode: "operator_javascript_output",
+    kind: "reporter",
+    inputs: {
+      JS: STRING,
+    },
+  },
+  "operators.join3": {
+    opcode: "operator_join3",
+    kind: "reporter",
+    inputs: {
+      STRING1: STRING,
+      STRING2: STRING,
+      STRING3: STRING,
+    },
+  },
+  "operators.lastIndexOf": {
+    opcode: "operator_lastIndexOfTextInText",
+    kind: "reporter",
+    inputs: {
+      TEXT1: STRING,
+      TEXT2: STRING,
+    },
+  },
+  "operators.interpolate": {
+    opcode: "operator_lerpFunc",
+    kind: "reporter",
+    inputs: {
+      ONE: NUMBER,
+      TWO: NUMBER,
+      AMOUNT: NUMBER,
+    },
+  },
+  "operators.lte": {
+    opcode: "operator_ltorequal",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: STRING,
+      OPERAND2: STRING,
+    },
+  },
+  "operators.nand": {
+    opcode: "operator_nand",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: BOOLEAN,
+      OPERAND2: BOOLEAN,
+    },
+  },
+  "operators.newLine": {
+    opcode: "operator_newLine",
+    kind: "reporter",
+  },
+  "operators.nor": {
+    opcode: "operator_nor",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: BOOLEAN,
+      OPERAND2: BOOLEAN,
+    },
+  },
+  "operators.notEqual": {
+    opcode: "operator_notequal",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: STRING,
+      OPERAND2: STRING,
+    },
+  },
+  "operators.power": {
+    opcode: "operator_power",
+    kind: "reporter",
+    inputs: {
+      NUM1: NUMBER,
+      NUM2: NUMBER,
+    },
+  },
+  "operators.randomBoolean": {
+    opcode: "operator_randomBoolean",
+    kind: "boolean",
+  },
+  "operators.readLine": {
+    opcode: "operator_readLineInMultilineText",
+    kind: "reporter",
+    inputs: {
+      LINE: NUMBER,
+      TEXT: STRING,
+    },
+  },
+  "operators.regexMatch": {
+    opcode: "operator_regexmatch",
+    kind: "reporter",
+    inputs: {
+      text: STRING,
+      reg: STRING,
+      regrule: STRING,
+    },
+  },
+  "operators.replaceAll": {
+    opcode: "operator_replaceAll",
+    kind: "reporter",
+    inputs: {
+      text: STRING,
+      term: STRING,
+      res: STRING,
+    },
+  },
+  "operators.replaceFirst": {
+    opcode: "operator_replaceFirst",
+    kind: "reporter",
+    inputs: {
+      text: STRING,
+      term: STRING,
+      res: STRING,
+    },
+  },
+  "operators.stringify": {
+    opcode: "operator_stringify",
+    kind: "reporter",
+    inputs: {
+      ONE: STRING,
+    },
+  },
+  "operators.tabCharacter": {
+    opcode: "operator_tabCharacter",
+    kind: "reporter",
+  },
+  "operators.includesLetterFrom": {
+    opcode: "operator_textIncludesLetterFrom",
+    kind: "boolean",
+    inputs: {
+      TEXT1: STRING,
+      TEXT2: STRING,
+    },
+  },
+  "operators.startsWithOrEndsWith": {
+    opcode: "operator_textStartsOrEndsWith",
+    kind: "boolean",
+    fields: { OPTION: "starts" },
+    inputs: {
+      TEXT1: STRING,
+      TEXT2: STRING,
+    },
+  },
+  "operators.toCase": {
+    opcode: "operator_toUpperLowerCase",
+    kind: "reporter",
+    fields: { OPTION: "upper" },
+    inputs: {
+      TEXT: STRING,
+    },
+  },
+  "operators.trueValue": {
+    opcode: "operator_trueBoolean",
+    kind: "boolean",
+  },
+  "operators.xnor": {
+    opcode: "operator_xnor",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: STRING,
+      OPERAND2: STRING,
+    },
+  },
+  "operators.xor": {
+    opcode: "operator_xor",
+    kind: "boolean",
+    inputs: {
+      OPERAND1: STRING,
+      OPERAND2: STRING,
+    },
+  },
+
+  // ---- sensing (PenguinMod) --------------------------------------------
+  "sensing.directionBetween": {
+    opcode: "sensing_directionTo",
+    kind: "reporter",
+    inputs: {
+      x2: STRING,
+      y2: STRING,
+      x1: STRING,
+      y1: STRING,
+    },
+  },
+  "sensing.distanceBetween": {
+    opcode: "sensing_distanceTo",
+    kind: "reporter",
+    inputs: {
+      x1: STRING,
+      y1: STRING,
+      x2: STRING,
+      y2: STRING,
+    },
+  },
+  "sensing.fingerDown": {
+    opcode: "sensing_fingerdown",
+    kind: "boolean",
+    inputs: {
+      FINGER_OPTION: FINGER_MENU,
+    },
+  },
+  "sensing.fingerTapped": {
+    opcode: "sensing_fingertapped",
+    kind: "boolean",
+    inputs: {
+      FINGER_OPTION: FINGER_MENU,
+    },
+  },
+  "sensing.fingerX": {
+    opcode: "sensing_fingerx",
+    kind: "reporter",
+    inputs: {
+      FINGER_OPTION: FINGER_MENU,
+    },
+  },
+  "sensing.fingerY": {
+    opcode: "sensing_fingery",
+    kind: "reporter",
+    inputs: {
+      FINGER_OPTION: FINGER_MENU,
+    },
+  },
+  "sensing.browser": {
+    opcode: "sensing_getbrowser",
+    kind: "reporter",
+  },
+  "sensing.clipboard": {
+    opcode: "sensing_getclipboard",
+    kind: "reporter",
+  },
+  "sensing.isDraggable": {
+    opcode: "sensing_getdragmode",
+    kind: "boolean",
+  },
+  "sensing.operatingSystem": {
+    opcode: "sensing_getoperatingsystem",
+    kind: "reporter",
+  },
+  "sensing.spriteWithAttribute": {
+    opcode: "sensing_getspritewithattrib",
+    kind: "reporter",
+    inputs: {
+      var: STRING,
+      val: STRING,
+    },
+  },
+  "sensing.url": {
+    opcode: "sensing_geturl",
+    kind: "reporter",
+  },
+  "sensing.touchingSpritePoint": {
+    opcode: "sensing_getxyoftouchingsprite",
+    kind: "reporter",
+    fields: { XY: "x" },
+    inputs: {
+      SPRITE: DISTANCE_MENU,
+    },
+  },
+  "sensing.isUpperCase": {
+    opcode: "sensing_isUpperCase",
+    kind: "boolean",
+    inputs: {
+      text: STRING,
+    },
+  },
+  "sensing.keyHit": {
+    opcode: "sensing_keyhit",
+    kind: "boolean",
+    inputs: {
+      KEY_OPTION: KEY_MENU,
+    },
+  },
+  "sensing.loggedIn": {
+    opcode: "sensing_loggedin",
+    kind: "boolean",
+  },
+  "sensing.isMobile": {
+    opcode: "sensing_mobile",
+    kind: "boolean",
+  },
+  "sensing.mouseClicked": {
+    opcode: "sensing_mouseclicked",
+    kind: "boolean",
+  },
+  "sensing.mouseScrolling": {
+    opcode: "sensing_mousescrolling",
+    kind: "boolean",
+    inputs: {
+      SCROLL_OPTION: SCROLL_MENU,
+    },
+  },
+  "sensing.objectTouchingClone": {
+    opcode: "sensing_objecttouchingclonesprite",
+    kind: "boolean",
+    inputs: {
+      FULLTOUCHINGOBJECTMENU: FULL_TOUCHING_MENU,
+      SPRITETOUCHINGOBJECTMENU: SPRITE_TOUCHING_MENU,
+    },
+  },
+  "sensing.objectTouchingObject": {
+    opcode: "sensing_objecttouchingobject",
+    kind: "boolean",
+    inputs: {
+      FULLTOUCHINGOBJECTMENU: FULL_TOUCHING_MENU,
+      SPRITETOUCHINGOBJECTMENU: SPRITE_TOUCHING_MENU,
+    },
+  },
+  "sensing.regexTest": {
+    opcode: "sensing_regextest",
+    kind: "boolean",
+    inputs: {
+      text: STRING,
+      reg: STRING,
+      regrule: STRING,
+    },
+  },
+  "sensing.setClipboard": {
+    opcode: "sensing_setclipboard",
+    inputs: {
+      ITEM: STRING,
+    },
+  },
+  "sensing.hasNumber": {
+    opcode: "sensing_thing_has_number",
+    kind: "boolean",
+    inputs: {
+      TEXT1: STRING,
+    },
+  },
+  "sensing.isNumber": {
+    opcode: "sensing_thing_is_number",
+    kind: "boolean",
+    inputs: {
+      TEXT1: STRING,
+    },
+  },
+  "sensing.isText": {
+    opcode: "sensing_thing_is_text",
+    kind: "boolean",
+    inputs: {
+      TEXT1: STRING,
+    },
+  },
+
+  // ---- sound (PenguinMod) --------------------------------------------
+  "sound.effectValue": {
+    opcode: "sound_getEffectValue",
+    kind: "reporter",
+    fields: { EFFECT: "PITCH" },
+  },
+  "sound.lengthOf": {
+    opcode: "sound_getLength",
+    kind: "reporter",
+    inputs: {
+      SOUND_MENU: SOUND_MENU,
+    },
+  },
+  "sound.soundVolume": {
+    opcode: "sound_getSoundVolume",
+    kind: "reporter",
+    inputs: {
+      SOUND_MENU: SOUND_MENU,
+    },
+  },
+  "sound.isPlaying": {
+    opcode: "sound_isSoundPlaying",
+    kind: "boolean",
+    inputs: {
+      SOUND_MENU: SOUND_MENU,
+    },
+  },
+  "sound.playAt": {
+    opcode: "sound_play_at_seconds",
+    inputs: {
+      SOUND_MENU: SOUND_MENU,
+      VALUE: NUMBER,
+    },
+  },
+  "sound.playAtUntilDone": {
+    opcode: "sound_play_at_seconds_until_done",
+    inputs: {
+      SOUND_MENU: SOUND_MENU,
+      VALUE: NUMBER,
+    },
+  },
+  "sound.playAllSounds": {
+    opcode: "sound_playallsounds",
+  },
+  "sound.setFadeOut": {
+    opcode: "sound_set_stop_fadeout_to",
+    inputs: {
+      VALUE: NUMBER,
+      SOUND_MENU: SOUND_MENU,
+    },
+  },
+  "sound.stop": {
+    opcode: "sound_stop",
+    inputs: {
+      SOUND_MENU: SOUND_MENU,
+    },
   },
 };
 

@@ -513,11 +513,18 @@ test("catalog lists blocks from extensions loaded over a URL", async () => {
     const listed = await execFileAsync(process.execPath, [bin, "l"], {
       cwd: dir,
     });
-    assert.match(
-      listed.stdout,
-      /signals\.send\s+-> signals_send \[command\] \(ext signals\)/,
+    assert.match(listed.stdout, /^ {2}signals · 1$/m);
+    assert.match(listed.stdout, /signals\.send\(MSG\)/);
+
+    const verbose = await execFileAsync(
+      process.execPath,
+      [bin, "l", "--verbose"],
+      { cwd: dir },
     );
-    assert.match(listed.stdout, /from extensions\)/);
+    assert.match(
+      verbose.stdout,
+      /signals\.send\(MSG\)\s+-> signals_send \[command\] \(ext signals\)/,
+    );
 
     const json = await execFileAsync(
       process.execPath,
@@ -553,7 +560,8 @@ test("catalog lists local extensions without the build-only URL warning", async 
   const listed = await execFileAsync(process.execPath, [bin, "l", dir], {
     cwd: dir,
   });
-  assert.match(listed.stdout, /signals\.send\s+-> signals_send/);
+  assert.match(listed.stdout, /^ {2}signals · 1$/m);
+  assert.match(listed.stdout, /signals\.send\(MSG\)/);
   assert.doesNotMatch(listed.stderr, /extensionURLs/);
 });
 
