@@ -1044,11 +1044,9 @@ export class Compiler {
     // List method: `items.push(x)`, `items.at(i)`, ...
     if (segments.length === 2) {
       const listInfo = ctx.resolveList(segments[0]);
-      const isListOperation = Object.entries(LIST_OPS).some(
-        ([name, spec]) =>
-          name === segments[1] || (spec.aliases || []).includes(segments[1]),
-      );
-      if (listInfo && (isListOperation || !entry))
+      // Canonical list methods take precedence; aliases resolve in emitListCall
+      // only when the name does not identify a catalog block.
+      if (listInfo && (Object.hasOwn(LIST_OPS, segments[1]) || !entry))
         return this.emitListCall(ctx, node, listInfo, parentId);
     }
 
