@@ -52,7 +52,7 @@
     "cross-fetch": "^4.1.0",
     "decode-html": "2.0.0",
     "format-message": "6.2.1",
-    "htmlparser2": "^3.10.0",
+    "htmlparser2": "^12.0.0",
     "immutable": "^3.8.4",
     "js-yaml": "^5.4.3",
     "jszip": "^3.10.1",
