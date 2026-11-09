@@ -18,6 +18,7 @@ import { readExtensionDataUri } from "../src/extensions.js";
 import { unzipSync } from "../src/sb3.js";
 import {
   VendorError,
+  formatDiff,
   installVendor,
   installVendorEntry,
   loadVendorExtensions,
@@ -1567,6 +1568,89 @@ vendor:
     const result = run(["catalog", "--no-upgrade-prompt"], dir);
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(result.stderr, /does not match any loaded extension/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function hasTerminalControl(text) {
+  for (const char of String(text)) {
+    const code = char.codePointAt(0);
+    if (code === 0x09 || code === 0x0a) continue;
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+test("formatDiff neutralizes terminal escape sequences in source and filenames", () => {
+  const evil =
+    "// \u001b[2J\u001b[H\u001b]0;pwned\u0007line\rreturn\nnext\tcol\n";
+  const diff = formatDiff("", evil, "extensions/\u001b[31mextension.js");
+  assert.ok(diff.startsWith("--- extensions/\\x1b[31mextension.js\n"));
+  assert.ok(
+    diff.includes("+// \\x1b[2J\\x1b[H\\x1b]0;pwned\\x07line\\x0dreturn\n"),
+  );
+  assert.ok(diff.includes("+next\tcol\n"));
+  assert.equal(hasTerminalControl(diff), false);
+});
+
+test("vendor update does not emit raw terminal escapes from extension source", () => {
+  const dir = project({ extensions: { "local.js": SIGNALS } });
+  try {
+    const installed = run(
+      ["vendor", "install", "./local.js", "--as", "local"],
+      dir,
+    );
+    assert.equal(installed.status, 0, installed.stderr);
+    write(
+      path.join(dir, "local.js"),
+      "// \u001b[2J\u001b[HIf you're reading this, the vulnerability works.\n",
+    );
+    const result = run(["vendor", "update"], dir);
+    assert.equal(result.status, 0, result.stderr);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.match(output, /\\x1b\[2J/);
+    assert.equal(hasTerminalControl(output), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("vendor commands neutralize control characters in names and lock paths", () => {
+  const name = "ext\u001b[31m";
+  const file = "extensions/\u001b[2Jevil.js";
+  const dir = tmp();
+  try {
+    write(
+      path.join(dir, "fx.yml"),
+      `project:\n  name: "Vendor"\nvendor:\n  ${JSON.stringify(name)}: ./local.js\n`,
+    );
+    write(path.join(dir, "local.js"), SIGNALS);
+    write(
+      path.join(dir, "fx.lock"),
+      JSON.stringify({
+        version: 1,
+        extensions: { [name]: { name, source: "./local.js", file } },
+      }),
+    );
+
+    const list = run(["vendor", "list"], dir);
+    assert.equal(list.status, 0, list.stderr);
+    assert.equal(hasTerminalControl(list.stdout + list.stderr), false);
+    assert.ok(list.stdout.includes("ext\\x1b[31m"));
+    assert.ok(list.stdout.includes("extensions/\\x1b[2Jevil.js"));
+
+    const verify = run(["vendor", "verify"], dir);
+    assert.equal(verify.status, 1);
+    assert.equal(hasTerminalControl(verify.stdout + verify.stderr), false);
+    assert.ok((verify.stdout + verify.stderr).includes("ext\\x1b[31m"));
+
+    const first = run(["vendor", "update"], dir);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(hasTerminalControl(first.stdout + first.stderr), false);
+    const second = run(["vendor", "update"], dir);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /ext\\x1b\[31m is up to date/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

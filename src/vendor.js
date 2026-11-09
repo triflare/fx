@@ -23,6 +23,7 @@ import {
   readExtensionDataUri,
   resolveSource,
 } from "./extensions.js";
+import { sanitizeTerminalText } from "./terminal.js";
 
 export const LOCK_FILENAME = "fx.lock";
 export const LOCK_VERSION = 1;
@@ -1146,13 +1147,14 @@ export async function loadVendorExtensions({
 
 /** A compact line diff, enough to review an extension or config change. */
 export function formatDiff(before, after, filename = "") {
+  const header = sanitizeTerminalText(filename);
   const a = String(before).split(/\r?\n/);
   const b = String(after).split(/\r?\n/);
   const rows = a.length;
   const columns = b.length;
   // Keep very large extensions from allocating an enormous matrix.
   if (rows * columns > 4_000_000) {
-    return `--- ${filename}\n+++ ${filename}\n@@ source changed @@\n`;
+    return `--- ${header}\n+++ ${header}\n@@ source changed @@\n`;
   }
   const table = Array.from(
     { length: rows + 1 },
@@ -1166,24 +1168,24 @@ export function formatDiff(before, after, filename = "") {
           : Math.max(table[i + 1][j], table[i][j + 1]);
     }
   }
-  const lines = [`--- ${filename}`, `+++ ${filename}`];
+  const lines = [`--- ${header}`, `+++ ${header}`];
   let i = 0;
   let j = 0;
   while (i < rows && j < columns) {
     if (a[i] === b[j]) {
-      lines.push(` ${a[i]}`);
+      lines.push(` ${sanitizeTerminalText(a[i])}`);
       i += 1;
       j += 1;
     } else if (table[i + 1][j] >= table[i][j + 1]) {
-      lines.push(`-${a[i]}`);
+      lines.push(`-${sanitizeTerminalText(a[i])}`);
       i += 1;
     } else {
-      lines.push(`+${b[j]}`);
+      lines.push(`+${sanitizeTerminalText(b[j])}`);
       j += 1;
     }
   }
-  while (i < rows) lines.push(`-${a[i++]}`);
-  while (j < columns) lines.push(`+${b[j++]}`);
+  while (i < rows) lines.push(`-${sanitizeTerminalText(a[i++])}`);
+  while (j < columns) lines.push(`+${sanitizeTerminalText(b[j++])}`);
   return `${lines.join("\n")}\n`;
 }
 

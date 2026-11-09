@@ -8,6 +8,7 @@
 
 import { styleText } from "node:util";
 import { brandText } from "../brand.js";
+import { sanitizeTerminalText } from "../terminal.js";
 import { formatColumns } from "./format.js";
 import { createTheme } from "./theme.js";
 
@@ -60,7 +61,7 @@ export function createReporter({
     const glyph = mark(symbol);
     const stream = type === "success" ? stdout : stderr;
     const theme = themeFor(stream);
-    const text = String(message);
+    const text = sanitizeTerminalText(message);
     const output = text
       .split("\n")
       .map((line, index) => {
@@ -102,48 +103,54 @@ export function createReporter({
 
     info(message) {
       if (!human) return;
-      stdout.write(`${message}\n`);
+      stdout.write(`${sanitizeTerminalText(message)}\n`);
     },
 
     bullet(message) {
       if (!human) return;
       const theme = themeFor(stdout);
       const glyph = mark("bullet");
-      stdout.write(`  ${glyph ? `${theme.accent(glyph)} ` : ""}${message}\n`);
+      const text = sanitizeTerminalText(message);
+      stdout.write(`  ${glyph ? `${theme.accent(glyph)} ` : ""}${text}\n`);
     },
 
     step(message) {
       if (!human) return;
       const theme = themeFor(stdout);
       const glyph = mark("progress");
-      stdout.write(`${glyph ? `${theme.accent(glyph)} ` : ""}${message}\n`);
+      const text = sanitizeTerminalText(message);
+      stdout.write(`${glyph ? `${theme.accent(glyph)} ` : ""}${text}\n`);
     },
 
     heading(message) {
       if (!human) return;
-      stdout.write(`${themeFor(stdout).heading(String(message))}\n`);
+      stdout.write(
+        `${themeFor(stdout).heading(sanitizeTerminalText(message))}\n`,
+      );
     },
 
     /** Aligned `label  value` row used by command summaries. */
     detail(label, value, { width = 13 } = {}) {
       if (!human) return;
       const theme = themeFor(stdout);
-      const text = String(value);
+      const text = sanitizeTerminalText(value);
       const rendered = text === "(none)" ? theme.muted(text) : theme.bold(text);
-      stdout.write(
-        `  ${theme.muted(String(label).padEnd(width))} ${rendered}\n`,
-      );
+      const name = sanitizeTerminalText(label);
+      stdout.write(`  ${theme.muted(name.padEnd(width))} ${rendered}\n`);
     },
 
     /** Aligned name + description row used by listings. */
-    item(label, value = "", { width = 24, suffix = "" } = {}) {
+    item(label, value = "", { width = 24, suffix = "", tone } = {}) {
       if (!human) return;
       const theme = themeFor(stdout);
-      const text = String(label);
+      const text = sanitizeTerminalText(label);
       const padded = text.padEnd(Math.max(width, text.length));
-      const detail = value ? ` ${value}` : "";
-      const note = suffix ? ` ${theme.muted(suffix)}` : "";
-      stdout.write(`  ${theme.accent(padded)}${detail}${note}\n`);
+      const detail = value ? ` ${sanitizeTerminalText(value)}` : "";
+      const note = suffix
+        ? ` ${theme.muted(sanitizeTerminalText(suffix))}`
+        : "";
+      const rendered = tone ? theme.tone(tone, detail) : detail;
+      stdout.write(`  ${theme.accent(padded)}${rendered}${note}\n`);
     },
 
     /** Compact multi-column rows for long block and file listings. */
@@ -171,7 +178,9 @@ export function createReporter({
     /** Quiet, de-emphasized line for incidental notes. */
     note(message) {
       if (!human) return;
-      stdout.write(`${themeFor(stdout).muted(message)}\n`);
+      stdout.write(
+        `${themeFor(stdout).muted(sanitizeTerminalText(message))}\n`,
+      );
     },
 
     warn(message) {
@@ -191,9 +200,8 @@ export function createReporter({
     hint(message) {
       if (!human) return;
       const theme = themeFor(stdout);
-      stdout.write(
-        `  ${theme.accent("↳")} ${theme.muted(`hint: ${message}`)}\n`,
-      );
+      const text = sanitizeTerminalText(message);
+      stdout.write(`  ${theme.accent("↳")} ${theme.muted(`hint: ${text}`)}\n`);
     },
 
     /** One JSON document, used for the command result envelope. */

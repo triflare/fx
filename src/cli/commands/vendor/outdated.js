@@ -34,7 +34,7 @@ export const vendorOutdatedCommand = {
           : result.status === "error"
             ? "danger"
             : "success";
-      reporter.item(result.name, reporter.tone(tone, label), { width: 24 });
+      reporter.item(result.name, label, { width: 24, tone });
       if (result.error) reporter.warn(result.error);
     }
     if (outdated > 0)
