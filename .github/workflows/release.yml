@@ -1,31 +1,43 @@
-name: Continuous Deployment
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main, develop, alpha]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  pull-requests: write
   id-token: write
 
 jobs:
-  publish:
-    name: Publish to npm Registry
+  release:
+    name: Publish release
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          fetch-depth: 0
           submodules: recursive
+          persist-credentials: true
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+          cache: npm
       - name: Set up npm
-        run: npm install --global npm@11
+        # dist-tags over OIDC trusted publishing require npm >= 11.21, which is
+        # newer than the npm bundled with Node 24.
+        run: npm install --global npm@^11.21
       - name: Install dependencies
         run: npm ci
       - name: Build vendored dependencies
@@ -36,11 +48,18 @@ jobs:
         run: npm run format:check
       - name: Run unit tests
         run: npm test
-      - name: Publish to npm Registry
-        run: npm publish --provenance --access public
+      - name: Release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "released=false" >> "$GITHUB_OUTPUT"
+          npx semantic-release
 
   publish-extension:
     name: Publish VS Code extension
+    needs: release
+    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,6 +68,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: v${{ needs.release.outputs.version }}
           persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -56,8 +76,6 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - name: Set up npm
-        run: npm install --global npm@11
       - name: Install dependencies
         run: npm ci
       - name: Check for typing errors
@@ -68,24 +86,20 @@ jobs:
         id: extension
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Publish to Visual Studio Marketplace
-        if: github.ref_name == format('v{0}', steps.extension.outputs.version)
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-          VERSION: ${{ steps.extension.outputs.version }}
         run: |
           if [ -z "$VSCE_PAT" ]; then
             echo "::warning::VSCE_PAT secret is not configured; the extension was not published to Visual Studio Marketplace."
             exit 0
           fi
-          npx vsce publish -p "$VSCE_PAT" --packagePath "fx-language-$VERSION.vsix"
+          npx vsce publish -p "$VSCE_PAT" --packagePath "fx-language-${{ steps.extension.outputs.version }}.vsix"
       - name: Publish to Open VSX
-        if: github.ref_name == format('v{0}', steps.extension.outputs.version)
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-          VERSION: ${{ steps.extension.outputs.version }}
         run: |
           if [ -z "$OVSX_PAT" ]; then
             echo "::warning::OVSX_PAT secret is not configured; the extension was not published to Open VSX."
             exit 0
           fi
-          npx ovsx publish "fx-language-$VERSION.vsix" -p "$OVSX_PAT"
+          npx ovsx publish "fx-language-${{ steps.extension.outputs.version }}.vsix" -p "$OVSX_PAT"
