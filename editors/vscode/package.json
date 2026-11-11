@@ -13,17 +13,28 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages", "Linters"],
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
   "main": "./dist/extension.js",
   "browser": "./dist/extension.js",
-  "extensionKind": ["ui", "workspace"],
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
   "activationEvents": [],
   "contributes": {
     "languages": [
       {
         "id": "fx",
-        "aliases": ["Triflare Fx", "fx"],
-        "extensions": [".tfx"],
+        "aliases": [
+          "Triflare Fx",
+          "fx"
+        ],
+        "extensions": [
+          ".tfx"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
