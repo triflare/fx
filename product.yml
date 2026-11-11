@@ -1,7 +1,7 @@
 # Identity
 name: "Triflare Fx"
 command: "fx"
-version: "2.1.0-beta.5"
+version: "2.1.0"
 tagline: "Code PenguinMod projects with text."
 author: "Triflare"
 homepage: "https://github.com/triflare/fx"
