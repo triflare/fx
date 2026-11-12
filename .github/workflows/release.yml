@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main, develop, alpha]
+    branches: [latest, beta, alpha]
 
 concurrency:
   group: release-${{ github.ref }}
@@ -66,7 +66,7 @@ jobs:
   publish-extension:
     name: Publish VS Code extension
     needs: release
-    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main'
+    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/latest'
     runs-on: ubuntu-latest
     defaults:
       run:
