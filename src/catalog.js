@@ -13,6 +13,9 @@
  *   - `args` describes a hat's parameters (`field` or `input`).
  *   - `extension` names the providing extension for non-core opcodes.
  *   - `dynamicNext` / `stopBlock` flag blocks with special stack behaviour.
+ *   - `extendable` marks a two-input block whose call may pass extra values;
+ *     compilation folds them into a chain of the same block (see the
+ *     compiler's `emitExtendableCall`).
  *
  * Input descriptors:
  *   NUMBER, STRING, BOOLEAN, ANGLE, COLOR, INTEGER, POSITIVE, WHOLE, SUBSTACK
@@ -387,21 +390,25 @@ const CORE_CATALOG = {
   "operators.add": {
     opcode: "operator_add",
     kind: "reporter",
+    extendable: true,
     inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.subtract": {
     opcode: "operator_subtract",
     kind: "reporter",
+    extendable: true,
     inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.multiply": {
     opcode: "operator_multiply",
     kind: "reporter",
+    extendable: true,
     inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.divide": {
     opcode: "operator_divide",
     kind: "reporter",
+    extendable: true,
     inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.random": {
@@ -427,11 +434,13 @@ const CORE_CATALOG = {
   "operators.and": {
     opcode: "operator_and",
     kind: "boolean",
+    extendable: true,
     inputs: { OPERAND1: BOOLEAN, OPERAND2: BOOLEAN },
   },
   "operators.or": {
     opcode: "operator_or",
     kind: "boolean",
+    extendable: true,
     inputs: { OPERAND1: BOOLEAN, OPERAND2: BOOLEAN },
   },
   "operators.not": {
@@ -442,6 +451,7 @@ const CORE_CATALOG = {
   "operators.join": {
     opcode: "operator_join",
     kind: "reporter",
+    extendable: true,
     inputs: { STRING1: STRING, STRING2: STRING },
   },
   "operators.letterOf": {
@@ -462,6 +472,7 @@ const CORE_CATALOG = {
   "operators.mod": {
     opcode: "operator_mod",
     kind: "reporter",
+    extendable: true,
     inputs: { NUM1: NUMBER, NUM2: NUMBER },
   },
   "operators.round": {

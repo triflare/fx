@@ -507,6 +507,73 @@ test("uses extension argument defaults when a call omits an argument", () => {
   assert.deepEqual(block.inputs.X, [1, [4, "0"]]);
 });
 
+test("extendable blocks fold extra arguments into two-input blocks", () => {
+  const ast = parse(
+    'sprite "S" { when greenFlag { looks.say(operators.join("a", "b", "c")); } }',
+    "inline.tfx",
+  );
+  const { project } = compile(ast, { project: {} });
+  const target = project.targets.find((t) => t.name === "S");
+  const blocks = Object.values(target.blocks);
+
+  const say = blocks.find((b) => b.opcode === "looks_say");
+  const outerId = Object.values(say.inputs)
+    .map((input) => input[1])
+    .find((ref) => target.blocks[ref]?.opcode === "operator_join");
+  const outer = target.blocks[outerId];
+  assert.deepEqual(outer.inputs.STRING2, [1, [10, "c"]]);
+
+  const innerId = outer.inputs.STRING1[1];
+  assert.deepEqual(outer.inputs.STRING1, [3, innerId, [10, ""]]);
+  const inner = target.blocks[innerId];
+  assert.equal(inner.opcode, "operator_join");
+  assert.equal(inner.parent, outerId);
+  assert.deepEqual(inner.inputs.STRING1, [1, [10, "a"]]);
+  assert.deepEqual(inner.inputs.STRING2, [1, [10, "b"]]);
+});
+
+test("extendable arithmetic and logic blocks chain left to right", () => {
+  const ast = parse(
+    'sprite "S" { when greenFlag { ' +
+      "looks.say(operators.subtract(10, 3, 2)); " +
+      "if (operators.and(operators.equals(1, 1), operators.equals(2, 2), operators.equals(3, 3))) { looks.show(); } " +
+      "} }",
+    "inline.tfx",
+  );
+  const { project } = compile(ast, { project: {} });
+  const target = project.targets.find((t) => t.name === "S");
+  const entries = Object.entries(target.blocks);
+
+  const subtracts = entries.filter(([, b]) => b.opcode === "operator_subtract");
+  assert.equal(subtracts.length, 2);
+  const outerSubtract = subtracts.find(
+    ([, b]) => b.inputs.NUM1[0] === 3 && target.blocks[b.inputs.NUM1[1]],
+  )[1];
+  const innerSubtract = target.blocks[outerSubtract.inputs.NUM1[1]];
+  assert.equal(innerSubtract.opcode, "operator_subtract");
+  assert.deepEqual(outerSubtract.inputs.NUM1, [
+    3,
+    outerSubtract.inputs.NUM1[1],
+    [4, "0"],
+  ]);
+  assert.deepEqual(outerSubtract.inputs.NUM2, [1, [4, "2"]]);
+  assert.deepEqual(innerSubtract.inputs.NUM1, [1, [4, "10"]]);
+  assert.deepEqual(innerSubtract.inputs.NUM2, [1, [4, "3"]]);
+
+  const ands = entries.filter(([, b]) => b.opcode === "operator_and");
+  assert.equal(ands.length, 2);
+  const condition = entries.find(([, b]) => b.opcode === "control_if")[1].inputs
+    .CONDITION[1];
+  const outerAnd = target.blocks[condition];
+  assert.equal(outerAnd.opcode, "operator_and");
+  const innerAnd = target.blocks[outerAnd.inputs.OPERAND1[1]];
+  assert.equal(innerAnd.opcode, "operator_and");
+  assert.equal(
+    target.blocks[innerAnd.inputs.OPERAND2[1]].opcode,
+    "operator_equals",
+  );
+});
+
 test("rejects statements after a block that ends the script", () => {
   const cases = [
     [
