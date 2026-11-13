@@ -1,6 +1,6 @@
 {
   "name": "@triflare/fx",
-  "version": "0.0.0",
+  "version": "2.2.0-alpha.1",
   "description": "Code PenguinMod projects with text.",
   "type": "module",
   "license": "Apache-2.0",
