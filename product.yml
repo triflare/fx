@@ -9,9 +9,9 @@ homepage: "https://github.com/triflare/fx"
 # Branding
 branding:
   colors:
-    primary: "#8B5CF6"
-    secondary: "#5D1CF2"
-    tertiary: "#420BC0"
+    primary: "#3CC6AB"
+    secondary: "#16A085"
+    tertiary: "#048E73"
 
 # Terminal Glyphs
 symbols:
