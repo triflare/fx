@@ -1076,9 +1076,21 @@ export class Compiler {
       if (id && !this.requiredExtensions.has(id))
         this.requiredExtensions.set(id, node.loc);
     }
-    const id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
     const fieldNames = Object.keys(entry.fields || {});
     const inputNames = Object.keys(entry.inputs || {});
+
+    // Extendable blocks take any number of arguments. A call with more than
+    // the block's own inputs folds into a left-associated chain of the same
+    // two-input vanilla block, so `operators.join(a, b, c)` becomes
+    // `join(join(a, b), c)` and still loads in plain Scratch.
+    if (
+      entry.extendable &&
+      node.args.length > inputNames.length + fieldNames.length
+    ) {
+      return this.emitExtendableCall(ctx, node, entry, parentId);
+    }
+
+    const id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
 
     if (node.args.length > inputNames.length + fieldNames.length) {
       this.fail(
@@ -1155,6 +1167,56 @@ export class Compiler {
         hasnext: hasNext,
         children: [],
       };
+    }
+
+    return { id, kind: entry.kind, entry };
+  }
+
+  /**
+   * Emit an extendable block called with more arguments than it has inputs.
+   * The first two arguments fill the block and every further argument wraps
+   * the result so far in another copy, keeping left-associative order:
+   * `operators.subtract(10, 3, 2)` is `(10 - 3) - 2`.
+   * @param {Context} ctx
+   * @param {object} node
+   * @param {object} entry
+   * @param {string|null} parentId
+   */
+  emitExtendableCall(ctx, node, entry, parentId) {
+    const specs = entry.inputs || {};
+    const inputNames = Object.keys(specs);
+    if (Object.keys(entry.fields || {}).length || inputNames.length !== 2)
+      this.fail(
+        `Internal error: ${node.name} is marked extendable but is not a two-input block`,
+        node.loc,
+      );
+
+    const [first, second] = inputNames;
+    // A chain position holds a reporter directly; boolean inputs take the
+    // reporter without the shadow-value fallback.
+    const chainInput = (spec, id) =>
+      spec.type === "boolean" ? [2, id] : [3, id, this.defaultPrim(spec)];
+
+    let id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
+    let inputs = {
+      [first]: this.buildInputForSpec(specs[first], node.args[0], id),
+      [second]: this.buildInputForSpec(specs[second], node.args[1], id),
+    };
+    ctx.target.blocks[id].inputs = inputs;
+    this.reparentInputs(ctx, id, inputs);
+
+    for (let i = 2; i < node.args.length; i++) {
+      const wrapId = this.addBlock(ctx, {
+        opcode: entry.opcode,
+        parent: parentId,
+      });
+      inputs = {
+        [first]: chainInput(specs[first], id),
+        [second]: this.buildInputForSpec(specs[second], node.args[i], wrapId),
+      };
+      ctx.target.blocks[wrapId].inputs = inputs;
+      this.reparentInputs(ctx, wrapId, inputs);
+      id = wrapId;
     }
 
     return { id, kind: entry.kind, entry };

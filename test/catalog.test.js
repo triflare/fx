@@ -89,6 +89,27 @@ test("greater-than hats use the WHENGREATERTHANMENU dropdown", () => {
   }
 });
 
+test("extendable blocks are vanilla two-input blocks", () => {
+  const names = Object.entries(CATALOG)
+    .filter(([, entry]) => entry.extendable)
+    .map(([name]) => name);
+  assert.deepEqual(names, [
+    "operators.add",
+    "operators.subtract",
+    "operators.multiply",
+    "operators.divide",
+    "operators.and",
+    "operators.or",
+    "operators.join",
+    "operators.mod",
+  ]);
+  for (const [name, entry] of Object.entries(CATALOG)) {
+    if (!entry.extendable) continue;
+    assert.deepEqual(Object.keys(entry.fields || {}), [], name);
+    assert.equal(Object.keys(entry.inputs || {}).length, 2, name);
+  }
+});
+
 test("the compiled showcase serializes the corrected hat and glide blocks", () => {
   const { project } = build({ file: showcase, useConfigFile: false });
   const byId = allBlocks(project);
