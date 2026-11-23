@@ -91,6 +91,9 @@ function installDependencies() {
     "--no-fund",
     "--no-package-lock",
     "--legacy-peer-deps",
+    // The VM depends on several packages hosted on GitHub. npm 11.20 and 12
+    // default `allow-git` to "none" and refuse to fetch them.
+    "--allow-git=all",
   ];
   const npm = npmLauncher();
   log("installing VM runtime dependencies");
