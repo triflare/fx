@@ -51,32 +51,58 @@ class RunTimeoutError extends Error {
 
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
-/** Read one line from standard input synchronously, for `run.prompt`. */
-export function readStdinLine() {
+/**
+ * Read one line from standard input synchronously, for `run.prompt`.
+ *
+ * A deadline makes a pending read cancellable. Node's default stdin handle is
+ * blocking, so switch it to non-blocking first; otherwise `readSync` would
+ * wait forever and the run timeout could never be observed.
+ */
+export function readStdinLine({ deadline = null, timeout = null } = {}) {
+  const handle = process.stdin?._handle;
+  const restoreBlocking =
+    typeof handle?.setBlocking === "function"
+      ? () => handle.setBlocking(true)
+      : () => {};
+  if (typeof handle?.setBlocking === "function") handle.setBlocking(false);
+
   const buffer = Buffer.alloc(1);
   const bytes = [];
-  for (;;) {
-    let read;
-    try {
-      read = fs.readSync(0, buffer, 0, 1, null);
-    } catch (error) {
-      if (error.code === "EAGAIN") {
-        Atomics.wait(sleepBuffer, 0, 0, 10);
-        continue;
+  const timedOut = () => {
+    if (deadline != null && performance.now() >= deadline)
+      throw new RunTimeoutError(
+        timeout ?? Math.max(1, deadline - performance.now()),
+      );
+  };
+  try {
+    for (;;) {
+      timedOut();
+      let read;
+      try {
+        read = fs.readSync(0, buffer, 0, 1, null);
+      } catch (error) {
+        if (error.code === "EAGAIN") {
+          const remaining =
+            deadline == null ? 10 : Math.max(1, deadline - performance.now());
+          Atomics.wait(sleepBuffer, 0, 0, Math.min(10, remaining));
+          continue;
+        }
+        if (error.code === "EOF" || error.code === "EBADF") break;
+        throw error;
       }
-      if (error.code === "EOF" || error.code === "EBADF") break;
-      throw error;
+      if (read === 0) break;
+      if (buffer[0] === 0x0a) break;
+      if (buffer[0] !== 0x0d) bytes.push(buffer[0]);
     }
-    if (read === 0) break;
-    if (buffer[0] === 0x0a) break;
-    if (buffer[0] !== 0x0d) bytes.push(buffer[0]);
+    return Buffer.from(bytes).toString("utf8");
+  } finally {
+    restoreBlocking();
   }
-  return Buffer.from(bytes).toString("utf8");
 }
 
-function defaultPrompt(message) {
+function defaultPrompt(message, options) {
   if (message) process.stderr.write(`${message} `);
-  return readStdinLine();
+  return readStdinLine(options);
 }
 
 /** Scratch-style truthiness for a compiled boolean input. */
@@ -267,7 +293,12 @@ async function runInVm({
   prompt = defaultPrompt,
 }) {
   const started = performance.now();
+  const deadline = started + config.timeout;
   const startDate = new Date();
+  const ask = (message) =>
+    prompt === defaultPrompt
+      ? defaultPrompt(message, { deadline, timeout: config.timeout })
+      : prompt(message);
   let vm;
   try {
     vm = await loadProject(built.sb3, {
@@ -335,7 +366,7 @@ async function runInVm({
     fxRun_prompt(args) {
       const message = String(args?.TEXT ?? "");
       emit("prompt", message);
-      const answer = String(prompt(message) ?? "");
+      const answer = String(ask(message) ?? "");
       prompts.push({ message, answer });
       return answer;
     },
@@ -369,7 +400,6 @@ async function runInVm({
 
     // Keep stepping until every script started by `main` has finished. A
     // broadcast or a cloned script may outlive the entry-point thread itself.
-    const deadline = started + config.timeout;
     while (runtime.threads.length > 0) {
       if (performance.now() > deadline)
         throw new RunTimeoutError(config.timeout);
@@ -431,6 +461,8 @@ async function runInVm({
   };
 }
 
+let runQueue = Promise.resolve();
+
 /**
  * Run a project's entry point headlessly.
  *
@@ -452,7 +484,15 @@ async function runInVm({
  * @param {(message: string) => string} [options.prompt] read a line for `run.prompt`
  * @returns {Promise<object>}
  */
-export async function runRuns({
+export function runRuns(options = {}) {
+  // Runs swap process-wide state (stdin, console, Math.random and the
+  // external-I/O guard), so overlapping API calls must not interleave.
+  const result = runQueue.then(() => runRunsNow(options));
+  runQueue = result.catch(() => {});
+  return result;
+}
+
+async function runRunsNow({
   dir = process.cwd(),
   files,
   cwd = process.cwd(),

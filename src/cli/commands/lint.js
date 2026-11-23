@@ -156,7 +156,9 @@ Exit status is 1 when errors are reported, or when warnings are reported with
   ],
   async run({ args, cwd, options, reporter, product }) {
     const target = resolveInput(args[0], cwd);
-    const files = target.file ? [target.file] : discoverSources(target.dir);
+    const files = target.file
+      ? [target.file]
+      : discoverSources(target.dir, { runPattern: null });
     if (files.length === 0)
       throw new UsageError(`No ${EXTENSION} files found under ${target.dir}`);
 
@@ -196,7 +198,7 @@ Exit status is 1 when errors are reported, or when warnings are reported with
     // the selected files separate for reporting, counts and --fix writes.
     // Diagnostics whose file is not a source (assets, fx.yml) stay visible.
     const projectDir = state.configDir ?? target.dir;
-    const analysisFiles = discoverSources(projectDir);
+    const analysisFiles = discoverSources(projectDir, { runPattern: null });
     for (const file of files)
       if (!analysisFiles.includes(file)) analysisFiles.push(file);
     const analysisSet = new Set(analysisFiles);

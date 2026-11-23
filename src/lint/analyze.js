@@ -1267,11 +1267,16 @@ export function lintSources({
   // both out of the cross-file merge keeps a helper-only test or run file from
   // leaking its top-level variables into project scope.
   const testRoot = rootDir ?? configDir ?? null;
+  const isRunSource = ({ file, ast }) =>
+    (ast.tests ?? []).length === 0 &&
+    !isTestPath(file, testRoot, testPattern) &&
+    isTestPath(file, testRoot, runPattern);
+  const runParsed = parsed.filter(isRunSource);
   const projectParsed = parsed.filter(
-    ({ file, ast }) =>
-      (ast.tests ?? []).length === 0 &&
-      !isTestPath(file, testRoot, testPattern) &&
-      !isTestPath(file, testRoot, runPattern),
+    (entry) =>
+      (entry.ast.tests ?? []).length === 0 &&
+      !isTestPath(entry.file, testRoot, testPattern) &&
+      !isTestPath(entry.file, testRoot, runPattern),
   );
 
   // Partial sprites are resolved by the project merge, which throws when the
@@ -1328,6 +1333,29 @@ export function lintSources({
   }
   if (program) analyzer.analyzeProgram(program);
   else for (const { ast } of projectParsed) analyzer.analyzeProgram(ast);
+
+  // Run files are entry points, so they stay out of the project merge but
+  // still need the project's declarations in scope. Analyze them beside a
+  // merged project program, then keep only diagnostics in the run files.
+  if (runParsed.length > 0) {
+    const runProgram = {
+      type: "Program",
+      stage: program?.stage ?? null,
+      sprites: program?.sprites ?? [],
+      topItems: [
+        ...(program?.topItems ?? []),
+        ...runParsed.flatMap(({ ast }) => ast.topItems),
+      ],
+    };
+    const runFiles = new Set(runParsed.map(({ file }) => file));
+    const first = analyzer.diagnostics.length;
+    analyzer.analyzeProgram(runProgram);
+    analyzer.diagnostics.push(
+      ...analyzer.diagnostics
+        .splice(first)
+        .filter((diagnostic) => runFiles.has(diagnostic.file)),
+    );
+  }
 
   // Diagnostics from filesystem-backed project checks (assets, fx.lock).
   for (const diagnostic of extraDiagnostics) {

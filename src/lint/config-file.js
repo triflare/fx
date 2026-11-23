@@ -100,14 +100,11 @@ export function parseProjectConfigText(text) {
 
   const patternOf = (value, fallback) => {
     if (value === true) return fallback;
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      typeof value.pattern === "string" &&
-      value.pattern.trim()
-    )
-      return value.pattern.trim();
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (value.pattern === undefined) return fallback;
+      if (typeof value.pattern === "string" && value.pattern.trim())
+        return value.pattern.trim();
+    }
     return null;
   };
   const testPattern = patternOf(fx.tests, DEFAULT_TEST_PATTERN);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
 import { DEFAULT_RUN, parseConfig } from "../src/config.js";
@@ -345,6 +345,79 @@ test("main can call helper functions declared in the run file", async () => {
     assert.deepEqual(result.prints, ["ready"]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test(
+  "a pending run.prompt is cancelled by the run timeout",
+  { timeout: 5000 },
+  async () => {
+    const dir = tmpProject({
+      runSource:
+        'let name = "";\nfunction main() {\n  name = run.prompt("Your name?");\n}\n',
+    });
+    fs.writeFileSync(
+      path.join(dir, "fx.yml"),
+      'project:\n  name: "Demo"\nfx:\n  run:\n    timeout: 100\n',
+    );
+    const child = spawn(process.execPath, [bin, "run"], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    try {
+      const exit = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error("fx run stayed blocked on stdin"));
+        }, 3000);
+        child.on("error", reject);
+        child.on("exit", (code, signal) => {
+          clearTimeout(timer);
+          resolve({ code, signal });
+        });
+      });
+      assert.equal(exit.signal, null);
+      assert.equal(exit.code, RUN_EXIT.FAILED);
+      assert.match(stderr, /timed out after 100ms/);
+    } finally {
+      child.stdin.destroy();
+      if (child.exitCode == null) child.kill("SIGKILL");
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("overlapping runs restore external I/O after the last one finishes", async () => {
+  const quick = tmpProject();
+  const slow = tmpProject({
+    runSource: 'function main() {\n  events.broadcast("spin");\n}\n',
+    source: `
+        sprite "Thing" {
+            when broadcast("spin") {
+                control.forever { }
+            }
+        }
+    `,
+  });
+  const originalFetch = globalThis.fetch;
+  try {
+    const [first, second] = await Promise.all([
+      runRuns({ dir: quick }),
+      runRuns({ dir: slow, timeout: 100 }),
+    ]);
+    assert.equal(first.exitCode, RUN_EXIT.OK, JSON.stringify(first));
+    assert.equal(second.error.name, "TimeoutError");
+    assert.equal(globalThis.fetch, originalFetch);
+  } finally {
+    fs.rmSync(quick, { recursive: true, force: true });
+    fs.rmSync(slow, { recursive: true, force: true });
   }
 });
 

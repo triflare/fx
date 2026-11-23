@@ -98,7 +98,7 @@ fx:
 | `ticksPerSecond`     | How many frames one second of project time contains.               |
 | `failOnRuntimeError` | Fails a run when the project reports an error.                     |
 
-Run files are never part of `fx build`, so an entry point cannot end up in the project you publish.
+Automatic source discovery skips run files during `fx build`, so an entry point under the run glob cannot end up in the project you publish. If you explicitly pass a run file to `fx build`, Fx compiles it like any other source.
 
 ## Extensions and limitations
 
