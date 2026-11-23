@@ -40,6 +40,19 @@ export const DEFAULT_TESTS = {
 };
 
 /**
+ * Deterministic defaults for `fx run`. A run executes one entry-point
+ * function and then keeps stepping the VM until every script it started has
+ * finished, so `timeout` is the wall-clock budget for the whole run.
+ */
+export const DEFAULT_RUN = {
+  pattern: "run/**/*.run.tfx",
+  seed: 12345,
+  timeout: 5000,
+  ticksPerSecond: 30,
+  failOnRuntimeError: true,
+};
+
+/**
  * Fx-only settings that never reach PenguinMod's project runtime config.
  * Kept in a separate top-level `fx:` block in fx.yml.
  */
@@ -47,6 +60,7 @@ export const DEFAULT_FX = {
   partialSprites: false,
   vendorDir: "extensions",
   tests: false,
+  run: false,
   lint: { ...DEFAULT_LINT, rules: { ...DEFAULT_LINT.rules } },
 };
 
@@ -110,6 +124,67 @@ export function normalizeTestConfig(value) {
     tests.failOnRuntimeError = Boolean(value.failOnRuntimeError);
   if (value.parallel != null) tests.parallel = Boolean(value.parallel);
   return tests;
+}
+
+/**
+ * Normalize the `fx.run` setting.
+ *
+ * `true` enables running with the defaults, `false` (or an absent key)
+ * disables it, and a mapping may override any default. The mapping form is
+ * what `fx feature run enable` writes and later edits by hand.
+ *
+ * @param {unknown} value
+ * @returns {false | (typeof DEFAULT_RUN & {enabled: true})}
+ */
+export function normalizeRunConfig(value) {
+  if (value == null || value === false) return false;
+  if (value === true) return { enabled: true, ...DEFAULT_RUN };
+  if (!isPlainObject(value))
+    throw new Error(
+      `${configFilename()}: fx.run must be true, false, or a mapping`,
+    );
+
+  const unknown = Object.keys(value).filter(
+    (key) => !Object.hasOwn(DEFAULT_RUN, key),
+  );
+  if (unknown.length)
+    throw new Error(
+      `${configFilename()}: unknown fx.run setting(s): ${unknown
+        .map((key) => `"${key}"`)
+        .join(", ")}`,
+    );
+
+  const run = { enabled: true, ...DEFAULT_RUN };
+  if (value.pattern != null) {
+    if (typeof value.pattern !== "string" || value.pattern.trim() === "")
+      throw new Error(`${configFilename()}: fx.run.pattern must be a glob`);
+    run.pattern = value.pattern.trim();
+  }
+  if (value.seed != null) {
+    const seed = Number(value.seed);
+    if (!Number.isFinite(seed))
+      throw new Error(`${configFilename()}: fx.run.seed must be a number`);
+    run.seed = seed;
+  }
+  if (value.timeout != null) {
+    const timeout = Number(value.timeout);
+    if (!Number.isFinite(timeout) || timeout <= 0)
+      throw new Error(
+        `${configFilename()}: fx.run.timeout must be a positive number of milliseconds`,
+      );
+    run.timeout = timeout;
+  }
+  if (value.ticksPerSecond != null) {
+    const ticks = Number(value.ticksPerSecond);
+    if (!Number.isFinite(ticks) || ticks <= 0)
+      throw new Error(
+        `${configFilename()}: fx.run.ticksPerSecond must be positive`,
+      );
+    run.ticksPerSecond = ticks;
+  }
+  if (value.failOnRuntimeError != null)
+    run.failOnRuntimeError = Boolean(value.failOnRuntimeError);
+  return run;
 }
 
 /** Default directory that receives vendored extension sources. */
@@ -495,6 +570,7 @@ export function normalizeFx(raw = {}) {
       fx.vendorDir = raw.vendorDir.trim();
     }
     if (raw.tests !== undefined) fx.tests = normalizeTestConfig(raw.tests);
+    if (raw.run !== undefined) fx.run = normalizeRunConfig(raw.run);
     fx.lint = normalizeLintConfig(
       raw.lint,
       (message) => new Error(`${configFilename()}: ${message}`),

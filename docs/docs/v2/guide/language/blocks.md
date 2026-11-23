@@ -162,6 +162,8 @@ To start a script when a message arrives, use `when broadcast("name")`. See [Eve
 | `operators.round(number)`           | Rounds a number.                                                            |
 | `operators.math(operation, number)` | Applies a math operation, such as `"abs"`, `"floor"`, `"sqrt"`, or `"sin"`. |
 
+`operators.join`, `operators.add`, `operators.subtract`, `operators.multiply`, `operators.divide`, `operators.mod`, `operators.and` and `operators.or` accept more than two arguments. Extra values fold left into nested two-input Scratch blocks, so `operators.join("a", "b", "c")` reads as `join(join("a", "b"), "c")` and `operators.subtract(10, 3, 2)` is `(10 - 3) - 2`.
+
 Arithmetic and comparisons are usually written as operators instead: `score + 1`, `score > 10`. See [Expressions](/guide/language/syntax#expressions).
 
 ### Pen

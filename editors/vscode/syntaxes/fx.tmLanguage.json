@@ -64,7 +64,7 @@
     "block-calls": {
       "patterns": [
         {
-          "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm|tempvars|data)(\\.)([A-Za-z_$][\\w$]*)",
+          "match": "\\b(motion|looks|sound|sensing|operators|control|events|pen|pm|tempvars|run|data)(\\.)([A-Za-z_$][\\w$]*)",
           "captures": {
             "1": { "name": "support.module.fx" },
             "2": { "name": "punctuation.accessor.fx" },

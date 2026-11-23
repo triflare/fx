@@ -180,7 +180,7 @@ fx feature <name> <action> [--force] [--dry-run]
 
 Installs, updates, or removes a built-in language feature. Actions are `enable`, `update`, and `disable`.
 
-The `tests` feature is built into Fx rather than vendored: it supports `enable`, `disable`, and a status report when the action is omitted. `fx feature tests update` fails because there is no vendored file or lock entry.
+The `tests` and `run` features are built into Fx rather than vendored: they support `enable`, `disable`, and a status report when the action is omitted. `fx feature tests update` and `fx feature run update` fail because there is no vendored file or lock entry.
 
 | Option      | What it does                                          |
 | ----------- | ----------------------------------------------------- |
@@ -209,6 +209,26 @@ Builds the project and runs every test file (`test/**/*.test.tfx` by default), s
 Exit codes: `0` all tests passed, `1` a test failed, `2` parse or configuration error, `3` interrupted, `4` invalid usage.
 
 See [Testing](/guide/workflow/testing) for test syntax, actions, state queries, and configuration.
+
+### fx run
+
+```bash
+fx run [<files...>] [--timeout <ms>] [--seed <number>] [--ticks-per-second <number>] [--allow-project-extensions] [--allow-external-io]
+```
+
+Compiles the project together with its run files, then executes the `main` function from the run file (`run/**/*.run.tfx` by default) in a fresh headless VM. `run.print` output is written as it happens. Running must be enabled first with `fx feature run enable`. Project extensions are blocked unless `--allow-project-extensions` is passed.
+
+| Option                       | What it does                                                          |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `--timeout`                  | Overrides `fx.run.timeout` for this run.                             |
+| `--seed`                     | Overrides `fx.run.seed` for this run.                                |
+| `--ticks-per-second`         | Overrides the simulated frame rate for this run.                     |
+| `--allow-project-extensions` | Trusts and loads this project's extensions for this run.             |
+| `--allow-external-io`        | Allows network access (`fetch` and `WebSocket`) during a run.         |
+
+Exit codes: `0` the run completed, `1` the run failed or timed out, `2` parse, build, configuration, or project-load error, `4` invalid usage.
+
+See [Running](/guide/workflow/running) for run files, output, settings, and limitations.
 
 ### fx sprite
 

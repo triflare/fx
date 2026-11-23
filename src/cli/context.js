@@ -170,16 +170,17 @@ export async function loadProjectExtensions({ configDir, loaded, reporter }) {
     for (const warning of vendored.warnings) reporter.warn(warning);
   }
 
-  if (loaded?.features && loaded.features.length > 0) {
-    const featureExtensions = await loadFeatureExtensions({
-      configDir,
-      config: loaded,
-    });
-    Object.assign(catalog, featureExtensions.catalog);
-    Object.assign(extensionUrls, featureExtensions.extensionUrls);
-    unsandboxed.push(...featureExtensions.unsandboxed);
-    for (const warning of featureExtensions.warnings) reporter.warn(warning);
-  }
+  // Vendored feature files and any enabled core feature extensions share one
+  // loader, so bundled extensions are available in builds without copying a
+  // file into the project.
+  const featureExtensions = await loadFeatureExtensions({
+    configDir,
+    config: loaded,
+  });
+  Object.assign(catalog, featureExtensions.catalog);
+  Object.assign(extensionUrls, featureExtensions.extensionUrls);
+  unsandboxed.push(...featureExtensions.unsandboxed);
+  for (const warning of featureExtensions.warnings) reporter.warn(warning);
 
   if (config.extensions && config.extensions.length > 0) {
     warnLegacyExtensions(loaded, reporter);
