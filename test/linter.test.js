@@ -386,6 +386,19 @@ vendor:
     "signals",
   ]);
 
+  const defaults = parseProjectConfigText(`fx:
+  tests:
+    seed: 7
+  run:
+    seed: 7
+`);
+  assert.equal(defaults.testPattern, "test/**/*.test.tfx");
+  assert.equal(defaults.runPattern, "run/**/*.run.tfx");
+  assert.equal(
+    parseProjectConfigText('fx:\n  run:\n    pattern: ""\n').runPattern,
+    null,
+  );
+
   const invalid = parseProjectConfigText("fx: [");
   assert.match(invalid.error, /unexpected end|flow sequence/i);
   assert.deepEqual(invalid.declaredExtensions, []);
@@ -581,6 +594,80 @@ test "cat is visible" {
     result.diagnostics.filter((entry) => entry.file === testFile),
     [],
   );
+});
+
+test("run files are analyzed with project declarations but stay out of project scope", () => {
+  const runFile = path.join("run", "main.run.tfx");
+  const projectSource = `stage {
+    function shared() { }
+}
+
+sprite "Cat" {
+    when greenFlag {
+        looks.say(runOnly);
+    }
+}`;
+  const runSource = `let runOnly = 0;
+
+function main() {
+    shared();
+    runOnly = missing;
+}`;
+  const result = lintSources({
+    sources: [
+      { file: FILE, source: projectSource },
+      { file: runFile, source: runSource },
+    ],
+    runPattern: "run/**/*.run.tfx",
+  });
+
+  const undefinedNames = result.diagnostics
+    .filter((entry) => entry.ruleId === "FX201")
+    .map((entry) => entry.file)
+    .sort();
+  assert.deepEqual(undefinedNames, [FILE, runFile].sort());
+
+  // `shared` comes from the project, while `missing` is reported in the run
+  // file itself. Neither run declaration leaks into the project merge.
+  const runDiagnostic = result.diagnostics.find(
+    (entry) => entry.file === runFile && entry.ruleId === "FX201",
+  );
+  assert.match(runDiagnostic.message, /missing/);
+});
+
+test("lint discovery includes run files that miss the configured pattern", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "run"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "fx.yml"),
+      'project:\n  name: "Demo"\nfx:\n  run:\n    pattern: "run/**/*.main.tfx"\n',
+    );
+    fs.writeFileSync(path.join(dir, FILE), 'sprite "Cat" { }\n');
+    fs.writeFileSync(
+      path.join(dir, "run", "main.main.tfx"),
+      "function main() {\n    run.print(entryMissing);\n}\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "run", "helper.run.tfx"),
+      "let helperValue = helperMissing;\n",
+    );
+
+    const result = run(["lint", "--json"], dir);
+    assert.equal(result.status, 1, result.stderr);
+    const document = JSON.parse(result.stdout);
+    const undefinedFiles = document.data.diagnostics
+      .filter((entry) => entry.ruleId === "FX201")
+      .map((entry) => entry.file)
+      .sort();
+    assert.deepEqual(undefinedFiles, [
+      path.join("run", "helper.run.tfx"),
+      path.join("run", "main.main.tfx"),
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("reports missing, unsupported and unused assets", () => {

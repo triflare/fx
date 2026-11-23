@@ -777,6 +777,41 @@ const CORE_CATALOG = {
     extension: "fxTempVars",
     requiresExtension: true,
   },
+  // ---------------------------------------------------------------- run
+  // `fx run` blocks. They are build-time no-ops: the compiler drops commands
+  // and folds reporters such as `run.prompt` to an empty string. Only the run
+  // build emits `fxRun_*` opcodes, which the headless runner implements
+  // directly instead of loading an extension.
+  "run.print": {
+    opcode: "fxRun_print",
+    runOnly: true,
+    inputs: { TEXT: { type: "string", default: "" } },
+  },
+  "run.warn": {
+    opcode: "fxRun_warn",
+    runOnly: true,
+    inputs: { TEXT: { type: "string", default: "" } },
+  },
+  "run.error": {
+    opcode: "fxRun_error",
+    runOnly: true,
+    inputs: { TEXT: { type: "string", default: "" } },
+  },
+  "run.assert": {
+    opcode: "fxRun_assert",
+    runOnly: true,
+    inputs: {
+      CONDITION: BOOLEAN,
+      MESSAGE: { type: "string", default: "" },
+    },
+  },
+  "run.prompt": {
+    opcode: "fxRun_prompt",
+    runOnly: true,
+    kind: "reporter",
+    inputs: { TEXT: { type: "string", default: "" } },
+  },
+
   // ---- control (PenguinMod) --------------------------------------------
   "control.backToGreenFlag": {
     opcode: "control_backToGreenFlag",

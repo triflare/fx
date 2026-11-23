@@ -59,3 +59,15 @@ when greenFlag {
 The feature's extension also provides blocks under the `fxTempVars` category, such as checking whether a variable exists, listing active variables, or deleting runtime variables. Run `fx catalog` to see their exact names.
 
 See [Temporary variables](/guide/language/syntax#temporary-variables) in the language reference.
+
+## Running
+
+The `run` feature adds headless entry points and the `run.print`, `run.warn`, `run.error`, `run.assert`, and `run.prompt` blocks. Enable it with `fx feature run enable`, then put a `main` function in `run/main.run.tfx` and run it with `fx run`:
+
+```tfx
+function main() {
+    events.broadcast("ready");
+}
+```
+
+The `run.*` blocks can be used anywhere in the project. `fx build` ignores them, while `fx run` compiles and executes them. The feature is built into Fx rather than vendored, so it has no file to update. See [Running](/guide/workflow/running) for settings and limitations.

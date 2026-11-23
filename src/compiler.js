@@ -126,6 +126,7 @@ export class Compiler {
    * @param {(p: string) => Buffer} [options.loadAsset]
    * @param {Record<string, object>} [options.catalog] extra/overriding catalog entries
    * @param {Record<string, string>} [options.extensionUrls] id -> URL
+   * @param {boolean} [options.runMode] compile run-only blocks instead of dropping them
    * @param {string} [options.file]
    */
   constructor({
@@ -133,12 +134,14 @@ export class Compiler {
     loadAsset,
     catalog,
     extensionUrls = {},
+    runMode = false,
     file = "<input>",
   } = {}) {
     this.projectConfig = project || {};
     this.loadAsset = loadAsset || null;
     this.catalog = catalog ? { ...CATALOG, ...catalog } : CATALOG;
     this.extensionUrls = extensionUrls;
+    this.runMode = Boolean(runMode);
     this.requiredExtensions = new Map();
     this.file = file;
     /** @type {string[]} Non-fatal problems worth surfacing to the user. */
@@ -156,9 +159,12 @@ export class Compiler {
     // Opcodes whose next-statement connection only exists once a mutation asks
     // for it (PenguinMod's loop nub), derived from the merged catalog.
     this.dynamicNextOpcodes = new Set();
+    this.runOnlyOpcodes = new Set();
     for (const entry of Object.values(this.catalog)) {
       if (entry && entry.dynamicNext && entry.opcode)
         this.dynamicNextOpcodes.add(entry.opcode);
+      if (entry && entry.runOnly && entry.opcode)
+        this.runOnlyOpcodes.add(entry.opcode);
     }
 
     this.assets = new Map(); // md5ext -> Buffer
@@ -1071,6 +1077,18 @@ export class Compiler {
   emitCatalogCall(ctx, node, entry, parentId) {
     if (entry.kind === "hat")
       this.fail(`${node.name} is an event and cannot be called`, node.loc);
+    if (entry.runOnly && !this.runMode) {
+      // `fx build` strips run-only blocks. Commands disappear entirely; a
+      // reporter such as `run.prompt` folds to an empty string so surrounding
+      // expressions and assignments still compile normally.
+      return {
+        id: null,
+        kind: entry.kind || "command",
+        entry,
+        ignored: true,
+        prim: [10, entry.kind === "boolean" ? "false" : ""],
+      };
+    }
     if (entry.requiresExtension) {
       const id = entry.extension || extensionForOpcode(entry.opcode);
       if (id && !this.requiredExtensions.has(id))
@@ -1458,6 +1476,8 @@ export class Compiler {
         return this.emitIdentifier(ctx, node);
       case "Call": {
         const result = this.emitCall(ctx, node, null);
+        if (result.ignored)
+          return { k: "prim", prim: result.prim, kind: result.kind };
         return { k: "block", id: result.id, kind: result.kind };
       }
       case "Binary":
@@ -1795,6 +1815,9 @@ export class Compiler {
       }
 
       for (const block of Object.values(target.blocks)) {
+        // Run-only blocks execute in the headless runner, not through an
+        // extension, so they must not add an extension id to the project.
+        if (this.runOnlyOpcodes.has(block.opcode)) continue;
         const ext =
           this.opcodeExtensions.get(block.opcode) ||
           extensionForOpcode(block.opcode);
