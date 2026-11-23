@@ -305,31 +305,40 @@ export function createRenderer() {
  * The dispatch broker is a process-wide singleton; dropping its services keeps
  * one VM's extensions from logging a provider conflict for the next.
  *
- * @param {{allowProjectExtensions?: boolean}} [options]
+ * `trustedExtensionUrls` names extensions that Fx itself ships. They load even
+ * when the project's own extensions are denied, because trusting a project
+ * must not silently disable a language feature the user enabled.
+ *
+ * @param {{allowProjectExtensions?: boolean, trustedExtensionUrls?: string[]}} [options]
  */
-export function createVm({ allowProjectExtensions = false } = {}) {
+export function createVm({
+  allowProjectExtensions = false,
+  trustedExtensionUrls = [],
+} = {}) {
   const { VirtualMachine, centralDispatch } = loadVmModules();
   centralDispatch.services = {};
+  const trusted = new Set(trustedExtensionUrls.map(String));
+  const allowed = (url) => allowProjectExtensions || trusted.has(String(url));
   const vm = new VirtualMachine();
   vm.attachStorage(createStorage());
   vm.attachRenderer(createRenderer());
   // Denying the load keeps both the extension source and its top-level code
   // from running, even when the project only configured it and no block uses
   // it. The VM reports "Permission to load extension denied" for the project.
-  vm.securityManager.canLoadExtensionFromProject = () =>
-    Promise.resolve(allowProjectExtensions);
+  vm.securityManager.canLoadExtensionFromProject = (url) =>
+    Promise.resolve(allowed(url));
   // Node has neither the web worker nor the iframe sandbox the VM would use, so
   // a permitted extension runs in this process, exactly like PenguinMod's
   // unsandboxed mode. Denied extensions never reach the sandbox selector.
-  vm.securityManager.getSandboxMode = () =>
-    Promise.resolve(allowProjectExtensions ? "unsandboxed" : "iframe");
+  vm.securityManager.getSandboxMode = (url) =>
+    Promise.resolve(allowed(url) ? "unsandboxed" : "iframe");
   return vm;
 }
 
 /**
  * Build a fresh VM and load an sb3/pmp buffer into it.
  * @param {Buffer} sb3
- * @param {{allowProjectExtensions?: boolean}} [options]
+ * @param {{allowProjectExtensions?: boolean, trustedExtensionUrls?: string[]}} [options]
  */
 export const loadProject = async (sb3, options = {}) => {
   const vm = createVm(options);

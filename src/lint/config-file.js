@@ -9,6 +9,8 @@
 
 import * as yaml from "js-yaml";
 import { normalizeLintConfig } from "./config.js";
+import { DEFAULT_TEST_PATTERN } from "../test/pattern.js";
+import { DEFAULT_RUN_PATTERN } from "../run/pattern.js";
 
 /** Extension name from a vendor path such as `extensions/signals.js`. */
 function extensionName(source) {
@@ -23,6 +25,7 @@ function extensionName(source) {
  *   lintConfig: object,
  *   declaredExtensions: string[],
  *   testPattern: string|null,
+ *   runPattern: string|null,
  *   projectName: string|null,
  *   error?: string,
  * }}
@@ -37,6 +40,7 @@ export function parseProjectConfigText(text) {
       lintConfig: null,
       declaredExtensions: [],
       testPattern: null,
+      runPattern: null,
       projectName: null,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -47,6 +51,7 @@ export function parseProjectConfigText(text) {
       lintConfig: null,
       declaredExtensions: [],
       testPattern: null,
+      runPattern: null,
       projectName: null,
       error: "fx.yml must contain a mapping at the top level",
     };
@@ -72,6 +77,7 @@ export function parseProjectConfigText(text) {
       lintConfig: null,
       declaredExtensions: [],
       testPattern: null,
+      runPattern: null,
       projectName: typeof project.name === "string" ? project.name : null,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -92,20 +98,27 @@ export function parseProjectConfigText(text) {
     }
   }
 
-  const testPattern =
-    fx.tests &&
-    typeof fx.tests === "object" &&
-    !Array.isArray(fx.tests) &&
-    typeof fx.tests.pattern === "string" &&
-    fx.tests.pattern.trim()
-      ? fx.tests.pattern.trim()
-      : null;
+  const patternOf = (value, fallback) => {
+    if (value === true) return fallback;
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof value.pattern === "string" &&
+      value.pattern.trim()
+    )
+      return value.pattern.trim();
+    return null;
+  };
+  const testPattern = patternOf(fx.tests, DEFAULT_TEST_PATTERN);
+  const runPattern = patternOf(fx.run, DEFAULT_RUN_PATTERN);
 
   return {
     config: { fx: { partialSprites: Boolean(fx.partialSprites) } },
     lintConfig,
     declaredExtensions: [...declaredExtensions],
     testPattern,
+    runPattern,
     projectName: typeof project.name === "string" ? project.name : null,
   };
 }

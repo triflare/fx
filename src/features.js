@@ -46,9 +46,10 @@ export const FEATURES = {
 };
 
 /**
- * Built-in language/compiler features. These have no extension source and no
- * vendored copy: they live behind a single `fx.<name>` setting, so they are
- * enabled and disabled without touching `features:`.
+ * Built-in language features. They live behind a single `fx.<name>` setting,
+ * so they are enabled and disabled without touching `features:`. A core
+ * feature may still ship an extension; Fx loads that bundled source itself
+ * instead of copying it into the project.
  */
 export const CORE_FEATURES = {
   tests: {
@@ -56,6 +57,14 @@ export const CORE_FEATURES = {
     title: "Testing",
     summary: "Write project tests and run them with `fx test`.",
     core: true,
+    command: "test",
+  },
+  run: {
+    name: "run",
+    title: "Running",
+    summary: "Run headless entry points with `fx run`.",
+    core: true,
+    command: "run",
   },
 };
 
@@ -291,7 +300,10 @@ export function disableFeature({ configPath, configDir, name } = {}) {
       name: feature.name,
       file: null,
       changed: true,
-      warning: `${feature.title} will become a core feature in a future version.`,
+      warning:
+        feature.name === "tests"
+          ? `${feature.title} will become a core feature in a future version.`
+          : null,
     };
   }
   const entry = readFeatureEntries(configPath).find(
@@ -392,6 +404,30 @@ export function updateFeature({
 }
 
 /**
+ * Core feature extensions that are enabled by their `fx.<name>` setting.
+ * These ship inside Fx instead of being copied into the project.
+ * @param {object} [config] loaded project configuration
+ * @returns {object[]}
+ */
+export function enabledCoreFeatureExtensions(config) {
+  return Object.values(CORE_FEATURES).filter(
+    (feature) => feature.source && config?.fx?.[feature.name],
+  );
+}
+
+/**
+ * URLs of enabled core feature extensions, for the headless VM's trust list.
+ * @param {object} [config] loaded project configuration
+ * @param {Record<string, string>} [extensionUrls] id -> URL map
+ * @returns {string[]}
+ */
+export function coreFeatureExtensionUrls(config, extensionUrls = {}) {
+  return enabledCoreFeatureExtensions(config)
+    .map((feature) => extensionUrls[feature.extensionId])
+    .filter(Boolean);
+}
+
+/**
  * Load every configured feature extension.
  * @returns {Promise<{catalog: Record<string, object>, extensionUrls: Record<string, string>, warnings: string[], ids: string[], unsandboxed: string[]}>}
  */
@@ -402,6 +438,7 @@ export async function loadFeatureExtensions({ configDir, config } = {}) {
   const ids = [];
   const unsandboxed = [];
 
+  const sources = [];
   for (const entry of config?.features || []) {
     const absolute = path.resolve(configDir, entry.file);
     if (!fs.existsSync(absolute)) {
@@ -410,6 +447,13 @@ export async function loadFeatureExtensions({ configDir, config } = {}) {
       );
       continue;
     }
+    sources.push(absolute);
+  }
+  for (const feature of enabledCoreFeatureExtensions(config)) {
+    sources.push(feature.source);
+  }
+
+  for (const absolute of sources) {
     const loaded = await loadExtensions([absolute], {
       baseDir: configDir,
       reportUnmatchedUnsandboxed: false,

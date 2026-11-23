@@ -81,6 +81,9 @@ export {
   jsonReport,
   junitReport,
 } from "./test/reporters.js";
+export { DEFAULT_RUN_PATTERN, discoverRuns } from "./run/discover.js";
+export { parseRunFile, parseRuns } from "./run/parse.js";
+export { RUN_EXIT, RunError, runRuns } from "./run/runner.js";
 export { createVm, loadProject, loadVmModules } from "./vm.js";
 export * from "./catalog.js";
 export * from "./config.js";
