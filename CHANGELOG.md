@@ -1,3 +1,9 @@
+## [2.2.0-alpha.4](https://github.com/triflare/fx/compare/v2.2.0-alpha.3...v2.2.0-alpha.4) (2026-11-23)
+
+### Features
+
+- advance alpha changes to beta ([#37](https://github.com/triflare/fx/issues/37)) ([635c07d](https://github.com/triflare/fx/commit/635c07df2dadb45d4774d8e4b15cddea867aff81))
+
 ## [2.2.0-alpha.3](https://github.com/triflare/fx/compare/v2.2.0-alpha.2...v2.2.0-alpha.3) (2026-11-23)
 
 ### Features
