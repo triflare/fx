@@ -10,6 +10,7 @@ import { zipSync } from "./sb3.js";
 import { loadConfigFrom, DEFAULT_PROJECT, DEFAULT_FX } from "./config.js";
 import { sourceExtension } from "./brand.js";
 import { DEFAULT_TEST_PATTERN } from "./test/discover.js";
+import { DEFAULT_RUN_PATTERN } from "./run/pattern.js";
 
 /**
  * @typedef {object} BuildOptions
@@ -24,6 +25,9 @@ import { DEFAULT_TEST_PATTERN } from "./test/discover.js";
  * @property {Record<string, object>} [catalog] Extra catalog entries.
  * @property {Record<string, string>} [extensionUrls] Extension id -> URL map.
  * @property {boolean} [useConfigFile] Whether to auto-load fx.yml (default true).
+ * @property {string|null} [testPattern] Glob for test files to exclude.
+ * @property {string|null} [runPattern] Glob for run files to exclude.
+ * @property {boolean} [runMode] Compile run-only blocks instead of dropping them.
  */
 
 /**
@@ -31,7 +35,10 @@ import { DEFAULT_TEST_PATTERN } from "./test/discover.js";
  * @param {BuildOptions} options
  * @returns {{dir: string, entries: Array<{file: string, source: string}>}}
  */
-function resolveSources(options, { testPattern = DEFAULT_TEST_PATTERN } = {}) {
+function resolveSources(
+  options,
+  { testPattern = DEFAULT_TEST_PATTERN, runPattern = DEFAULT_RUN_PATTERN } = {},
+) {
   const cwd = process.cwd();
 
   if (Array.isArray(options.sources)) {
@@ -85,7 +92,7 @@ function resolveSources(options, { testPattern = DEFAULT_TEST_PATTERN } = {}) {
   }
 
   const dir = path.resolve(options.dir || cwd);
-  const files = discoverSources(dir, { testPattern });
+  const files = discoverSources(dir, { testPattern, runPattern });
   if (files.length === 0)
     throw new Error(`No ${sourceExtension()} files found under ${dir}`);
   return {
@@ -130,6 +137,9 @@ export function build(options = {}) {
     testPattern:
       options.testPattern ??
       (fxConfig.tests ? fxConfig.tests.pattern : DEFAULT_TEST_PATTERN),
+    runPattern:
+      options.runPattern ??
+      (fxConfig.run ? fxConfig.run.pattern : DEFAULT_RUN_PATTERN),
   });
   if (entries.length === 0)
     throw new Error("No Triflare Fx sources to compile");
@@ -159,6 +169,7 @@ export function build(options = {}) {
     loadAsset,
     catalog: options.catalog,
     extensionUrls: options.extensionUrls,
+    runMode: options.runMode,
     file: entries[0].file,
   });
   const { project, assets } = compiler.compile(ast);

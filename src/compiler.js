@@ -126,6 +126,7 @@ export class Compiler {
    * @param {(p: string) => Buffer} [options.loadAsset]
    * @param {Record<string, object>} [options.catalog] extra/overriding catalog entries
    * @param {Record<string, string>} [options.extensionUrls] id -> URL
+   * @param {boolean} [options.runMode] compile run-only blocks instead of dropping them
    * @param {string} [options.file]
    */
   constructor({
@@ -133,12 +134,14 @@ export class Compiler {
     loadAsset,
     catalog,
     extensionUrls = {},
+    runMode = false,
     file = "<input>",
   } = {}) {
     this.projectConfig = project || {};
     this.loadAsset = loadAsset || null;
     this.catalog = catalog ? { ...CATALOG, ...catalog } : CATALOG;
     this.extensionUrls = extensionUrls;
+    this.runMode = Boolean(runMode);
     this.requiredExtensions = new Map();
     this.file = file;
     /** @type {string[]} Non-fatal problems worth surfacing to the user. */
@@ -156,9 +159,12 @@ export class Compiler {
     // Opcodes whose next-statement connection only exists once a mutation asks
     // for it (PenguinMod's loop nub), derived from the merged catalog.
     this.dynamicNextOpcodes = new Set();
+    this.runOnlyOpcodes = new Set();
     for (const entry of Object.values(this.catalog)) {
       if (entry && entry.dynamicNext && entry.opcode)
         this.dynamicNextOpcodes.add(entry.opcode);
+      if (entry && entry.runOnly && entry.opcode)
+        this.runOnlyOpcodes.add(entry.opcode);
     }
 
     this.assets = new Map(); // md5ext -> Buffer
@@ -1071,14 +1077,38 @@ export class Compiler {
   emitCatalogCall(ctx, node, entry, parentId) {
     if (entry.kind === "hat")
       this.fail(`${node.name} is an event and cannot be called`, node.loc);
+    if (entry.runOnly && !this.runMode) {
+      // `fx build` strips run-only blocks. Commands disappear entirely; a
+      // reporter such as `run.prompt` folds to an empty string so surrounding
+      // expressions and assignments still compile normally.
+      return {
+        id: null,
+        kind: entry.kind || "command",
+        entry,
+        ignored: true,
+        prim: [10, entry.kind === "boolean" ? "false" : ""],
+      };
+    }
     if (entry.requiresExtension) {
       const id = entry.extension || extensionForOpcode(entry.opcode);
       if (id && !this.requiredExtensions.has(id))
         this.requiredExtensions.set(id, node.loc);
     }
-    const id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
     const fieldNames = Object.keys(entry.fields || {});
     const inputNames = Object.keys(entry.inputs || {});
+
+    // Extendable blocks take any number of arguments. A call with more than
+    // the block's own inputs folds into a left-associated chain of the same
+    // two-input vanilla block, so `operators.join(a, b, c)` becomes
+    // `join(join(a, b), c)` and still loads in plain Scratch.
+    if (
+      entry.extendable &&
+      node.args.length > inputNames.length + fieldNames.length
+    ) {
+      return this.emitExtendableCall(ctx, node, entry, parentId);
+    }
+
+    const id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
 
     if (node.args.length > inputNames.length + fieldNames.length) {
       this.fail(
@@ -1155,6 +1185,56 @@ export class Compiler {
         hasnext: hasNext,
         children: [],
       };
+    }
+
+    return { id, kind: entry.kind, entry };
+  }
+
+  /**
+   * Emit an extendable block called with more arguments than it has inputs.
+   * The first two arguments fill the block and every further argument wraps
+   * the result so far in another copy, keeping left-associative order:
+   * `operators.subtract(10, 3, 2)` is `(10 - 3) - 2`.
+   * @param {Context} ctx
+   * @param {object} node
+   * @param {object} entry
+   * @param {string|null} parentId
+   */
+  emitExtendableCall(ctx, node, entry, parentId) {
+    const specs = entry.inputs || {};
+    const inputNames = Object.keys(specs);
+    if (Object.keys(entry.fields || {}).length || inputNames.length !== 2)
+      this.fail(
+        `Internal error: ${node.name} is marked extendable but is not a two-input block`,
+        node.loc,
+      );
+
+    const [first, second] = inputNames;
+    // A chain position holds a reporter directly; boolean inputs take the
+    // reporter without the shadow-value fallback.
+    const chainInput = (spec, id) =>
+      spec.type === "boolean" ? [2, id] : [3, id, this.defaultPrim(spec)];
+
+    let id = this.addBlock(ctx, { opcode: entry.opcode, parent: parentId });
+    let inputs = {
+      [first]: this.buildInputForSpec(specs[first], node.args[0], id),
+      [second]: this.buildInputForSpec(specs[second], node.args[1], id),
+    };
+    ctx.target.blocks[id].inputs = inputs;
+    this.reparentInputs(ctx, id, inputs);
+
+    for (let i = 2; i < node.args.length; i++) {
+      const wrapId = this.addBlock(ctx, {
+        opcode: entry.opcode,
+        parent: parentId,
+      });
+      inputs = {
+        [first]: chainInput(specs[first], id),
+        [second]: this.buildInputForSpec(specs[second], node.args[i], wrapId),
+      };
+      ctx.target.blocks[wrapId].inputs = inputs;
+      this.reparentInputs(ctx, wrapId, inputs);
+      id = wrapId;
     }
 
     return { id, kind: entry.kind, entry };
@@ -1396,6 +1476,8 @@ export class Compiler {
         return this.emitIdentifier(ctx, node);
       case "Call": {
         const result = this.emitCall(ctx, node, null);
+        if (result.ignored)
+          return { k: "prim", prim: result.prim, kind: result.kind };
         return { k: "block", id: result.id, kind: result.kind };
       }
       case "Binary":
@@ -1733,6 +1815,9 @@ export class Compiler {
       }
 
       for (const block of Object.values(target.blocks)) {
+        // Run-only blocks execute in the headless runner, not through an
+        // extension, so they must not add an extension id to the project.
+        if (this.runOnlyOpcodes.has(block.opcode)) continue;
         const ext =
           this.opcodeExtensions.get(block.opcode) ||
           extensionForOpcode(block.opcode);

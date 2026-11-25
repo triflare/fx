@@ -10,6 +10,7 @@ import path from "node:path";
 import { configFilename, sourceExtension } from "./brand.js";
 import { mergePrograms as mergeParsed } from "./merge.js";
 import { DEFAULT_TEST_PATTERN, matchesTestPattern } from "./test/discover.js";
+import { DEFAULT_RUN_PATTERN } from "./run/pattern.js";
 
 /** Directories never scanned for `.tfx` sources. */
 const IGNORED_DIRS = new Set([
@@ -22,17 +23,18 @@ const IGNORED_DIRS = new Set([
 
 /**
  * Recursively find every `.tfx` file under `dir`, skipping hidden entries and
- * well-known build/dependency directories. Test files are skipped so they
- * never become part of the project target.
+ * well-known build/dependency directories. Test and run files are skipped so
+ * they never become part of the project target.
  *
  * Results are deterministic (sorted by path) so builds are reproducible.
  * @param {string} dir
- * @param {{testPattern?: string|null}} [options] `null` keeps test files
+ * @param {{testPattern?: string|null, runPattern?: string|null}} [options]
+ *   `null` keeps test or run files
  * @returns {string[]} absolute file paths
  */
 export function discoverSources(
   dir,
-  { testPattern = DEFAULT_TEST_PATTERN } = {},
+  { testPattern = DEFAULT_TEST_PATTERN, runPattern = DEFAULT_RUN_PATTERN } = {},
 ) {
   const root = path.resolve(dir);
   const found = [];
@@ -56,10 +58,9 @@ export function discoverSources(
         entry.isFile() &&
         entry.name.toLowerCase().endsWith(extension)
       ) {
-        if (testPattern) {
-          const relative = path.relative(root, full).split(path.sep).join("/");
-          if (matchesTestPattern(relative, testPattern)) continue;
-        }
+        const relative = path.relative(root, full).split(path.sep).join("/");
+        if (testPattern && matchesTestPattern(relative, testPattern)) continue;
+        if (runPattern && matchesTestPattern(relative, runPattern)) continue;
         found.push(full);
       }
     }

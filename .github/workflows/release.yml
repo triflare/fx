@@ -23,16 +23,28 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       channel: ${{ steps.release.outputs.channel }}
     steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: triflare
+          repositories: fx
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           submodules: recursive
           persist-credentials: true
+          token: ${{ steps.app-token.outputs.token }}
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          # semantic-release 26 requires Node >= 26.13 and exits immediately on
+          # older runtimes. The library itself still supports Node >= 22, so the
+          # test matrix stays on 22 and 24; only the release job is bumped.
+          node-version: 26
           cache: npm
       - name: Set up npm
         # `npm stage` (staged publishing) requires npm >= 11.15 and dist-tags
@@ -51,7 +63,7 @@ jobs:
       - name: Release
         id: release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           echo "released=false" >> "$GITHUB_OUTPUT"
           npx semantic-release

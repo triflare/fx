@@ -15,6 +15,7 @@ import { tokenizeWithComments } from "../lexer.js";
 import { mergePrograms } from "../merge.js";
 import { parse } from "../parser.js";
 import { DEFAULT_TEST_PATTERN, isTestPath } from "../test/pattern.js";
+import { DEFAULT_RUN_PATTERN } from "../run/pattern.js";
 import { DEFAULT_LINT, resolveRuleSeverities } from "./config.js";
 import { RULES, ruleById } from "./rules.js";
 
@@ -1195,6 +1196,7 @@ export function sortDiagnostics(diagnostics) {
  *   configDir?: string|null,
  *   rootDir?: string|null,
  *   testPattern?: string|null,
+ *   runPattern?: string|null,
  *   extensionCatalog?: Record<string, object>,
  *   declaredExtensions?: string[],
  *   lintConfig?: object,
@@ -1216,6 +1218,7 @@ export function lintSources({
   configDir = null,
   rootDir = null,
   testPattern = DEFAULT_TEST_PATTERN,
+  runPattern = DEFAULT_RUN_PATTERN,
   extensionCatalog = {},
   declaredExtensions = [],
   lintConfig = DEFAULT_LINT,
@@ -1258,18 +1261,22 @@ export function lintSources({
   }
 
   // A source that declares tests, or whose path matches the configured
-  // test-file pattern, is a test file. Test files are never part of the
-  // project program — `mergePrograms` rejects them by design — so they are
-  // left out of the cross-file merge and the project rules. Editors lint every
-  // `.tfx` file in a project, test files included, and must not report the
-  // merge error on each test declaration. Pattern matching also keeps a
-  // helper-only test file (no `test` declarations) from leaking its top-level
-  // variables into project scope.
+  // test-file or run-file pattern, is not project code. Test files are never
+  // part of the project program — `mergePrograms` rejects them by design — and
+  // run files are entry points that `fx run` merges only in memory. Leaving
+  // both out of the cross-file merge keeps a helper-only test or run file from
+  // leaking its top-level variables into project scope.
   const testRoot = rootDir ?? configDir ?? null;
+  const isRunSource = ({ file, ast }) =>
+    (ast.tests ?? []).length === 0 &&
+    !isTestPath(file, testRoot, testPattern) &&
+    isTestPath(file, testRoot, runPattern);
+  const runParsed = parsed.filter(isRunSource);
   const projectParsed = parsed.filter(
-    ({ file, ast }) =>
-      (ast.tests ?? []).length === 0 &&
-      !isTestPath(file, testRoot, testPattern),
+    (entry) =>
+      (entry.ast.tests ?? []).length === 0 &&
+      !isTestPath(entry.file, testRoot, testPattern) &&
+      !isTestPath(entry.file, testRoot, runPattern),
   );
 
   // Partial sprites are resolved by the project merge, which throws when the
@@ -1326,6 +1333,29 @@ export function lintSources({
   }
   if (program) analyzer.analyzeProgram(program);
   else for (const { ast } of projectParsed) analyzer.analyzeProgram(ast);
+
+  // Run files are entry points, so they stay out of the project merge but
+  // still need the project's declarations in scope. Analyze them beside a
+  // merged project program, then keep only diagnostics in the run files.
+  if (runParsed.length > 0) {
+    const runProgram = {
+      type: "Program",
+      stage: program?.stage ?? null,
+      sprites: program?.sprites ?? [],
+      topItems: [
+        ...(program?.topItems ?? []),
+        ...runParsed.flatMap(({ ast }) => ast.topItems),
+      ],
+    };
+    const runFiles = new Set(runParsed.map(({ file }) => file));
+    const first = analyzer.diagnostics.length;
+    analyzer.analyzeProgram(runProgram);
+    analyzer.diagnostics.push(
+      ...analyzer.diagnostics
+        .splice(first)
+        .filter((diagnostic) => runFiles.has(diagnostic.file)),
+    );
+  }
 
   // Diagnostics from filesystem-backed project checks (assets, fx.lock).
   for (const diagnostic of extraDiagnostics) {

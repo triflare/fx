@@ -18,9 +18,10 @@ test("the all-blocks showcase uses every catalog block", () => {
 
   const missing = [];
   for (const [name, entry] of Object.entries(CATALOG)) {
-    // Extension-backed blocks require opting into the feature, so the
-    // showcase (which builds without configuration) cannot use them.
-    if (entry.requiresExtension) continue;
+    // Extension-backed blocks require opting into the feature, and run-only
+    // blocks are stripped from ordinary builds, so the showcase cannot use
+    // either kind.
+    if (entry.requiresExtension || entry.runOnly) continue;
     if (!opcodes.has(entry.opcode)) missing.push(`${name} -> ${entry.opcode}`);
   }
   assert.deepEqual(
@@ -29,7 +30,9 @@ test("the all-blocks showcase uses every catalog block", () => {
     `missing catalog blocks: ${missing.join(", ")}`,
   );
   assert.equal(
-    Object.values(CATALOG).filter((entry) => !entry.requiresExtension).length,
+    Object.values(CATALOG).filter(
+      (entry) => !entry.requiresExtension && !entry.runOnly,
+    ).length,
     248,
   );
 });

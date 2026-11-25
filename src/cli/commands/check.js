@@ -28,7 +28,10 @@ building an archive.`,
     const { target, loaded } = state;
     const files = target.file
       ? [target.file]
-      : discoverSources(target.dir, { testPattern: loaded.fx?.tests?.pattern });
+      : discoverSources(target.dir, {
+          testPattern: loaded.fx?.tests?.pattern,
+          runPattern: loaded.fx?.run?.pattern,
+        });
     if (files.length === 0)
       throw new UsageError(`No ${EXTENSION} files found under ${target.dir}`);
 

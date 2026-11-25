@@ -12,9 +12,8 @@ import path from "node:path";
 import { build } from "../build.js";
 import { loadProject } from "../vm.js";
 import { loadConfigFrom, DEFAULT_TESTS } from "../config.js";
-import { loadExtensions } from "../extensions.js";
-import { loadFeatureExtensions } from "../features.js";
-import { loadVendorExtensions } from "../vendor.js";
+import { loadProjectCatalog } from "../project-catalog.js";
+import { coreFeatureExtensionUrls } from "../features.js";
 import { productVersion } from "../brand.js";
 import { discoverTests } from "./discover.js";
 import { parseTests } from "./parse.js";
@@ -918,7 +917,10 @@ const EXTERNAL_IO_APIS = ["fetch", "WebSocket"];
  * access, so this covers the VM's web APIs rather than containing code the
  * user chose to run. Every replaced property is restored after the test.
  */
-export function installExternalIOGuard(extensionUrls = []) {
+export function installExternalIOGuard(
+  extensionUrls = [],
+  { label = "fx test", hint = 'Pass "--allow-external-io" to allow it.' } = {},
+) {
   const allowed = new Set(extensionUrls);
   for (const url of extensionUrls) {
     try {
@@ -931,8 +933,7 @@ export function installExternalIOGuard(extensionUrls = []) {
   const originalFetch = globalThis.fetch;
   const block = (name) => {
     throw new TestError(
-      `External network access is blocked during fx test (${name}). ` +
-        'Pass "--allow-external-io" to allow it.',
+      `External network access is blocked during ${label} (${name}). ${hint}`,
       { exitCode: TEST_EXIT.ERROR },
     );
   };
@@ -992,12 +993,20 @@ async function runOneTest(options) {
  * Run one test in a fresh VM and return its outcome.
  * @returns {Promise<object>} status, duration, ticks and any failure
  */
-async function runOneTestInVm({ test, helpers, sb3, config, seed }) {
+async function runOneTestInVm({
+  test,
+  helpers,
+  sb3,
+  config,
+  seed,
+  trustedExtensionUrls = [],
+}) {
   const started = performance.now();
   let vm;
   try {
     vm = await loadProject(sb3, {
       allowProjectExtensions: config.allowProjectExtensions,
+      trustedExtensionUrls,
     });
   } catch (error) {
     // A VM or extension load failure is an execution error, not a failed
@@ -1099,36 +1108,6 @@ async function runOneTestInVm({ test, helpers, sb3, config, seed }) {
 }
 
 // ---------------------------------------------------------------------- driver
-
-/** Load vendored, feature and legacy extensions into one catalog. */
-async function loadCatalog({ configDir, loaded }) {
-  const catalog = {};
-  const extensionUrls = {};
-  const warnings = [];
-  if (loaded.vendor?.length) {
-    const vendored = await loadVendorExtensions({ configDir, config: loaded });
-    Object.assign(catalog, vendored.catalog);
-    Object.assign(extensionUrls, vendored.extensionUrls);
-    warnings.push(...vendored.warnings);
-  }
-  if (loaded.features?.length) {
-    const features = await loadFeatureExtensions({ configDir, config: loaded });
-    Object.assign(catalog, features.catalog);
-    Object.assign(extensionUrls, features.extensionUrls);
-    warnings.push(...features.warnings);
-  }
-  if (loaded.project?.extensions?.length) {
-    const legacy = await loadExtensions(loaded.project.extensions, {
-      baseDir: configDir,
-      expectUnsandboxed: loaded.project.unsandboxed,
-      reportUnmatchedUnsandboxed: false,
-    });
-    Object.assign(catalog, legacy.catalog);
-    Object.assign(extensionUrls, legacy.extensionUrls);
-    warnings.push(...legacy.warnings);
-  }
-  return { catalog, extensionUrls, warnings };
-}
 
 /** One-line description of a failure, with its source location. */
 function describeFailure(error) {
@@ -1295,7 +1274,7 @@ export async function runTests({
   });
 
   let extensions = { catalog, extensionUrls, warnings: [] };
-  if (!catalog) extensions = await loadCatalog({ configDir, loaded });
+  if (!catalog) extensions = await loadProjectCatalog({ configDir, loaded });
 
   // A project extension is arbitrary JavaScript that would run with Node
   // process access in the VM, including its top-level code and configured
@@ -1377,6 +1356,10 @@ export async function runTests({
           config,
           seed: config.seed,
           extensionUrls: extensions.extensionUrls,
+          trustedExtensionUrls: coreFeatureExtensionUrls(
+            loaded,
+            extensions.extensionUrls,
+          ),
         });
       } catch (error) {
         outcome = {

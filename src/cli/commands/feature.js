@@ -46,7 +46,9 @@ export const featureCommand = {
       reporter.detail("Setting", `fx.${feature.name}`);
       reporter.info(
         enabled
-          ? `Run "fx test" to run the project's tests.`
+          ? feature.command === "run"
+            ? `Run "fx run" to run the project's entry point.`
+            : `Run "fx ${feature.command ?? "test"}" to use this feature.`
           : `Run "fx feature ${feature.name} enable" to enable it.`,
       );
       return {
