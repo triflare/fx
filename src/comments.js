@@ -78,10 +78,11 @@ export function attachComments(ast, comments, tokens, spans) {
         close: tokens.length - 1,
         owner: null,
         target: "Stage",
+        stage: true,
       },
     ];
     for (const item of programItems)
-      collectScopes(item, scopes, "Stage", indexes, spans);
+      collectScopes(item, scopes, "Stage", true, indexes, spans);
 
     for (const comment of comments) {
       const text = commentText(comment.text);
@@ -97,32 +98,70 @@ export function attachComments(ast, comments, tokens, spans) {
   }
   ast.standaloneComments = standalone;
 
-  function addStandalone(text, target) {
-    if (target) standalone.push({ text, target });
+  function addStandalone(text, target, stage) {
+    // `""` is a valid sprite name, so only a missing target falls back to the
+    // stage in the compiler; an empty name must still resolve through byName.
+    if (target != null) standalone.push({ text, target, stage });
   }
 
-  function placeComment(program, scope, comment, text, indexes) {
-    const items = scope.items
+  /** Sibling items ordered by source position, built once per scope. */
+  function orderedItems(scope, indexes) {
+    if (scope.entries) return scope.entries;
+    const entries = scope.items
       .map((item) => ({ item, index: indexes.get(item.loc) }))
       .filter((entry) => entry.index !== undefined)
       .sort((a, b) => a.index - b.index);
+    // An item ends at the last token before the next item (or the scope's
+    // closing brace), so a trailing comment on a multiline item is still on
+    // that item's line.
+    for (let i = 0; i < entries.length; i++) {
+      const end = i + 1 < entries.length ? entries[i + 1].index : scope.close;
+      const token = tokens[Math.max(0, end - 1)];
+      entries[i].endLine = token ? token.line : entries[i].item.loc.line;
+    }
+    scope.entries = entries;
+    return entries;
+  }
 
-    // A comment after code on the same line belongs to that code.
-    const sameLine = items.findLast(
-      (entry) =>
-        entry.item.loc.line === comment.line && entry.index < comment.after,
-    );
-    if (sameLine) return place(program, scope, sameLine.item, text);
+  /** First position in the ordered entries whose token index is >= `index`. */
+  function lowerBound(entries, index) {
+    let low = 0;
+    let high = entries.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (entries[mid].index < index) low = mid + 1;
+      else high = mid;
+    }
+    return low;
+  }
 
-    const next = items.find((entry) => entry.index >= comment.after);
+  function placeComment(program, scope, comment, text, indexes) {
+    // Comments inside a test body are dropped with the rest of the test.
+    if (scope.drop) return;
+    const entries = orderedItems(scope, indexes);
+    const position = lowerBound(entries, comment.after);
+
+    // A comment after code on the same line belongs to that code, including
+    // when the code spans several lines.
+    for (let i = position - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry.endLine !== comment.line) break;
+      return place(program, scope, entry.item, text);
+    }
+
+    const next = entries[position];
     if (next) return place(program, scope, next.item, text);
 
-    const previous = items.findLast((entry) => entry.index < comment.after);
+    // Nothing follows in a block body: the comment describes the block.
+    if (scope.owner && BLOCK_OWNERS.has(scope.owner.type))
+      return place(program, scope, scope.owner, text);
+
+    const previous = entries[position - 1];
     if (previous) return place(program, scope, previous.item, text);
 
     // An empty body: the comment describes the block or sprite that owns it.
     if (scope.owner) return place(program, scope, scope.owner, text);
-    addStandalone(text, scope.target);
+    addStandalone(text, scope.target, scope.stage);
   }
 
   function place(program, scope, item, text) {
@@ -132,15 +171,11 @@ export function attachComments(ast, comments, tokens, spans) {
       item.comments.push(text);
       return;
     }
-    addStandalone(text, targetFor(item, scope));
+    if (item.type === "SpriteDecl")
+      return addStandalone(text, item.name, false);
+    if (item.type === "StageDecl") return addStandalone(text, "Stage", true);
+    addStandalone(text, scope.target, scope.stage);
   }
-}
-
-/** Which target a comment belongs to when it cannot be attached to a block. */
-function targetFor(item, scope) {
-  if (item.type === "SpriteDecl") return item.name;
-  if (item.type === "StageDecl") return "Stage";
-  return scope.target;
 }
 
 function innermostScope(scopes, index) {
@@ -152,12 +187,19 @@ function innermostScope(scopes, index) {
   return best;
 }
 
-function collectScopes(item, scopes, target, indexes, spans) {
-  // Test files never reach a built project, so their comments are dropped.
-  if (!item || item.type === "TestDecl") return;
+function collectScopes(item, scopes, target, stage, indexes, spans) {
+  if (!item) return;
 
   const span = spans.get(item) || {};
-  const addScope = (body, open, close, owner, scopeTarget) => {
+  const addScope = (
+    body,
+    open,
+    close,
+    owner,
+    scopeTarget,
+    scopeStage,
+    drop = false,
+  ) => {
     if (!body || !open || !close) return;
     scopes.push({
       items: body,
@@ -165,53 +207,78 @@ function collectScopes(item, scopes, target, indexes, spans) {
       close: indexes.get(close) ?? -1,
       owner,
       target: scopeTarget,
+      stage: scopeStage,
+      drop,
     });
   };
 
+  // Test files never reach a built project, so their comments are dropped.
+  // Their braces are still registered as a scope so comments inside a test
+  // body cannot attach to declarations around it.
+  if (item.type === "TestDecl") {
+    addScope(
+      item.body,
+      span.bodyOpen,
+      span.bodyClose,
+      item,
+      target,
+      stage,
+      true,
+    );
+    return;
+  }
+
   switch (item.type) {
     case "SpriteDecl":
-      addScope(item.body, span.bodyOpen, span.bodyClose, item, item.name);
+      addScope(
+        item.body,
+        span.bodyOpen,
+        span.bodyClose,
+        item,
+        item.name,
+        false,
+      );
       for (const child of item.body)
-        collectScopes(child, scopes, item.name, indexes, spans);
+        collectScopes(child, scopes, item.name, false, indexes, spans);
       break;
     case "StageDecl":
-      addScope(item.body, span.bodyOpen, span.bodyClose, item, "Stage");
+      addScope(item.body, span.bodyOpen, span.bodyClose, item, "Stage", true);
       for (const child of item.body)
-        collectScopes(child, scopes, "Stage", indexes, spans);
+        collectScopes(child, scopes, "Stage", true, indexes, spans);
       break;
     case "HatDecl":
     case "FunctionDecl":
-      addScope(item.body, span.bodyOpen, span.bodyClose, item, target);
+      addScope(item.body, span.bodyOpen, span.bodyClose, item, target, stage);
       for (const child of item.body)
-        collectScopes(child, scopes, target, indexes, spans);
+        collectScopes(child, scopes, target, stage, indexes, spans);
       break;
     case "If":
-      addScope(item.then, span.bodyOpen, span.bodyClose, item, target);
+      addScope(item.then, span.bodyOpen, span.bodyClose, item, target, stage);
       for (const child of item.then)
-        collectScopes(child, scopes, target, indexes, spans);
+        collectScopes(child, scopes, target, stage, indexes, spans);
       if (span.elseOpen) {
-        addScope(item.else, span.elseOpen, span.elseClose, item, target);
+        addScope(item.else, span.elseOpen, span.elseClose, item, target, stage);
       }
       for (const child of item.else || [])
-        collectScopes(child, scopes, target, indexes, spans);
+        collectScopes(child, scopes, target, stage, indexes, spans);
       break;
     case "Repeat":
     case "While":
     case "Forever":
-      addScope(item.body, span.bodyOpen, span.bodyClose, item, target);
+      addScope(item.body, span.bodyOpen, span.bodyClose, item, target, stage);
       for (const child of item.body)
-        collectScopes(child, scopes, target, indexes, spans);
+        collectScopes(child, scopes, target, stage, indexes, spans);
       break;
     case "BlockCall":
       if (item.body) {
-        addScope(item.body, span.bodyOpen, span.bodyClose, item, target);
+        addScope(item.body, span.bodyOpen, span.bodyClose, item, target, stage);
         for (const child of item.body)
-          collectScopes(child, scopes, target, indexes, spans);
+          collectScopes(child, scopes, target, stage, indexes, spans);
       }
       if (item.else) {
-        addScope(item.else, span.elseOpen, span.elseClose, item, target);
+        addScope(item.else, span.elseOpen, span.elseClose, item, target, stage);
         for (const child of item.else)
-          collectScopes(child, scopes, target, indexes, spans);
+          collectScopes(child, scopes, target, stage, indexes, spans);
       }
       break;
     default:

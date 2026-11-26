@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { build, writeSb3 } from "../src/build.js";
+import { build } from "../src/build.js";
 import { GRID_OFFSET, MIN_BLOCK_Y } from "../src/layout.js";
 import { loadProject } from "./helpers/vm.js";
 
@@ -93,8 +93,9 @@ test("keeps unanchorable comments as workspace comments on their target", () => 
   for (const comment of workspace) assert.equal(comment.x, GRID_OFFSET);
   workspace.sort((a, b) => a.y - b.y);
   for (let i = 1; i < workspace.length; i++) {
+    const previous = workspace[i - 1];
     assert.ok(
-      workspace[i].y - workspace[i - 1].y >= MIN_BLOCK_Y,
+      workspace[i].y >= previous.y + previous.height + MIN_BLOCK_Y,
       "workspace comments must not overlap",
     );
   }
@@ -112,16 +113,19 @@ test("keeps unanchorable comments as workspace comments on their target", () => 
 });
 
 test("comments survive a VM round trip", async () => {
-  const project = compile(`
-    // sprite docs
-    sprite "S" {
-      when greenFlag {
-        // greeting
-        looks.say("hi");
+  const { sb3 } = build({
+    useConfigFile: false,
+    source: `
+      // sprite docs
+      sprite "S" {
+        when greenFlag {
+          // greeting
+          looks.say("hi");
+        }
       }
-    }
-  `);
-  const vm = await loadProject(writeSb3(project, new Map()));
+    `,
+  });
+  const vm = await loadProject(sb3);
   const target = vm.runtime.targets.find((t) => t.getName() === "S");
 
   const say = Object.values(target.blocks._blocks).find(

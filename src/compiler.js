@@ -252,6 +252,15 @@ export class Compiler {
     // Source comments that could not sit on a block become workspace comments.
     this.emitStandaloneComments(ast, contexts);
 
+    // The config comment is a workspace comment too. Emit it before layout so
+    // it is positioned with the rest instead of floating at its old spot.
+    const configText = configComment(this.projectConfig);
+    if (configText)
+      this.addWorkspaceComment(this.stageCtx, configText, {
+        width: 350,
+        height: 170,
+      });
+
     // Pass 4: pack the scripts like the editor's clean up tool. Sizes depend on
     // the complete block tree, so this has to run after every stack exists.
     for (const ctx of contexts) layoutTarget(ctx.target, this.catalog);
@@ -728,15 +737,20 @@ export class Compiler {
    * Add a comment that floats on the target's workspace instead of a block.
    * @param {Context} ctx
    * @param {string} text
+   * @param {{width?: number, height?: number}} [size]
    */
-  addWorkspaceComment(ctx, text) {
+  addWorkspaceComment(
+    ctx,
+    text,
+    { width = COMMENT_WIDTH, height = COMMENT_HEIGHT } = {},
+  ) {
     const id = uid("c");
     ctx.target.comments[id] = {
       blockId: null,
       x: null,
       y: null,
-      width: COMMENT_WIDTH,
-      height: COMMENT_HEIGHT,
+      width,
+      height,
       minimized: false,
       text,
     };
@@ -746,9 +760,16 @@ export class Compiler {
   emitStandaloneComments(ast, contexts) {
     const standalone = ast.standaloneComments || [];
     if (standalone.length === 0) return;
-    const byName = new Map(contexts.map((ctx) => [ctx.target.name, ctx]));
+    // Sprite comments are routed by name; stage comments carry an explicit
+    // flag so a sprite named "Stage" cannot steal them.
+    const byName = new Map();
+    for (const ctx of contexts) {
+      if (!ctx.target.isStage) byName.set(ctx.target.name, ctx);
+    }
     for (const comment of standalone) {
-      const ctx = byName.get(comment.target) || this.stageCtx;
+      const ctx = comment.stage
+        ? this.stageCtx
+        : byName.get(comment.target) || this.stageCtx;
       this.addWorkspaceComment(ctx, comment.text);
     }
   }
@@ -799,7 +820,13 @@ export class Compiler {
         );
       }
       const id = this.compileStatement(ctx, statement);
-      if (id == null) continue;
+      if (id == null) {
+        // A statement stripped in build mode (run-only block) still carries
+        // its notes: keep them on the workspace instead of dropping them.
+        if (statement.comments && statement.comments.length)
+          this.addWorkspaceComment(ctx, statement.comments.join("\n"));
+        continue;
+      }
       this.attachNodeComments(ctx, statement, id);
       if (first == null) {
         first = id;
@@ -1847,19 +1874,6 @@ export class Compiler {
         // broadcasts live on the stage
         for (const [name, id] of this.broadcasts) target.broadcasts[id] = name;
         this.ensureStageAssets(target);
-        const comment = configComment(this.projectConfig);
-        if (comment) {
-          const commentId = uid("c");
-          target.comments[commentId] = {
-            blockId: null,
-            x: 50,
-            y: 50,
-            width: 350,
-            height: 170,
-            minimized: false,
-            text: comment,
-          };
-        }
       } else {
         this.ensureSpriteAssets(target);
       }

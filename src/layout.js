@@ -76,6 +76,20 @@ function extensionsFor(catalog) {
   return extensions;
 }
 
+/** Opcode -> catalog entry, so layout can read an input's declared type. */
+const entrySets = new WeakMap();
+
+function entriesFor(catalog) {
+  const known = entrySets.get(catalog);
+  if (known) return known;
+  const entries = new Map();
+  for (const entry of Object.values(catalog)) {
+    if (entry && entry.opcode) entries.set(entry.opcode, entry);
+  }
+  entrySets.set(catalog, entries);
+  return entries;
+}
+
 /**
  * Build an opcode -> human label map from the catalog. The Fx name is the
  * closest thing a compiler has to the block's rendered text (`motion.moveSteps`
@@ -143,10 +157,14 @@ function fieldWidth(value) {
 
 /**
  * Whether an input holds a nested statement stack. Project JSON uses the same
- * `[2, id]` shape for any block-valued input, so the input name is the only
- * reliable marker; scratch-blocks names statement inputs `SUBSTACK*`.
+ * `[2, id]` shape for any block-valued input, so the catalog's input descriptor
+ * is the reliable marker; extension blocks may name the stack anything (such as
+ * `BODY`). Fall back to scratch-blocks' `SUBSTACK*` naming when the catalog has
+ * no descriptor for the input.
  */
-function isStatementInput(name) {
+function isStatementInput(name, entry) {
+  const spec = entry && entry.inputs && entry.inputs[name];
+  if (spec) return spec.type === "substack";
   return String(name).startsWith("SUBSTACK");
 }
 
@@ -179,7 +197,7 @@ function shadowWidth(block) {
  * Width of one value input, following a reporter into its own inputs when one
  * is plugged in.
  */
-function inputWidth(blocks, input, labels) {
+function inputWidth(blocks, input, labels, entries) {
   const value = inputBlockId(input);
   if (Array.isArray(value)) {
     // Compressed primitive: [shadowType, value]. Colour pickers are fixed size.
@@ -192,18 +210,19 @@ function inputWidth(blocks, input, labels) {
   // The VM expands primitives into shadow blocks. Reporters and procedure
   // prototypes are real blocks and are measured as such.
   if (child.shadow && !child.mutation) return shadowWidth(child);
-  return rowWidth(blocks, child, labels);
+  return rowWidth(blocks, child, labels, entries);
 }
 
 /**
  * Width of a block's own row (labels, fields and value inputs), before any
  * nested statement stacks widen it.
  */
-function rowWidth(blocks, block, labels) {
+function rowWidth(blocks, block, labels, entries) {
+  const entry = entries.get(block.opcode);
   let width = BLOCK_PADDING_X + textWidth(blockLabel(block, labels));
   for (const [name, input] of Object.entries(block.inputs || {})) {
-    if (isStatementInput(name)) continue;
-    width += ELEMENT_GAP + inputWidth(blocks, input, labels);
+    if (isStatementInput(name, entry)) continue;
+    width += ELEMENT_GAP + inputWidth(blocks, input, labels, entries);
   }
   for (const field of Object.values(block.fields || {})) {
     width += ELEMENT_GAP + fieldWidth(fieldValue(field));
@@ -212,44 +231,52 @@ function rowWidth(blocks, block, labels) {
 }
 
 /** Width of a block, including the statement stacks nested inside it. */
-function blockWidth(blocks, block, labels) {
-  const own = rowWidth(blocks, block, labels);
+function blockWidth(blocks, block, labels, entries) {
+  const entry = entries.get(block.opcode);
+  const own = rowWidth(blocks, block, labels, entries);
   let nested = 0;
   for (const [name, input] of Object.entries(block.inputs || {})) {
-    if (!isStatementInput(name)) continue;
+    if (!isStatementInput(name, entry)) continue;
     const first = statementBlockId(input);
     if (first && blocks[first]) {
-      nested = Math.max(nested, stackWidth(blocks, first, labels));
+      nested = Math.max(nested, stackWidth(blocks, first, labels, entries));
     }
   }
   return nested ? Math.max(own, nested + STATEMENT_INDENT) : own;
 }
 
-function stackWidth(blocks, firstId, labels) {
+function stackWidth(blocks, firstId, labels, entries) {
   let width = 0;
   let block = blocks[firstId];
   while (block) {
-    width = Math.max(width, blockWidth(blocks, block, labels));
+    width = Math.max(width, blockWidth(blocks, block, labels, entries));
     block = block.next ? blocks[block.next] : null;
   }
   return width;
 }
 
-/** Whether an input subtree contains a block from an extension. */
+/**
+ * Whether an input subtree contains a block from an extension. Walks pending
+ * reporters with an explicit work list so long chains cannot exhaust the call
+ * stack.
+ */
 function hasExtensionBlock(blocks, input, extensions) {
   const seen = new Set();
-  const visit = (id) => {
-    if (typeof id !== "string" || seen.has(id)) return false;
+  const pending = [inputBlockId(input)];
+  while (pending.length) {
+    const id = pending.pop();
+    if (typeof id !== "string" || seen.has(id)) continue;
     seen.add(id);
     const block = blocks[id];
-    if (!block) return false;
+    if (!block) continue;
     if (extensions.has(block.opcode)) return true;
     for (const child of Object.values(block.inputs || {})) {
-      if (visit(inputBlockId(child))) return true;
+      const childId = inputBlockId(child);
+      if (typeof childId === "string" && !seen.has(childId))
+        pending.push(childId);
     }
-    return false;
-  };
-  return visit(inputBlockId(input));
+  }
+  return false;
 }
 
 /**
@@ -260,14 +287,15 @@ function hasExtensionBlock(blocks, input, extensions) {
  * one grid unit taller, and a next-statement notch is part of the block's
  * height. Hats are drawn above the block's origin, so they add no height.
  */
-function blockHeight(blocks, block, extensions) {
+function blockHeight(blocks, block, extensions, entries) {
+  const entry = entries.get(block.opcode);
   let height = MIN_BLOCK_Y;
 
   // Extension statement blocks render their inline row one grid unit taller,
   // and so do rows holding an extension reporter.
   let inlineRow = extensions.has(block.opcode) && block.parent != null;
   for (const [name, input] of Object.entries(block.inputs || {})) {
-    if (!isStatementInput(name)) {
+    if (!isStatementInput(name, entry)) {
       inlineRow ||= hasExtensionBlock(blocks, input, extensions);
     }
   }
@@ -275,11 +303,13 @@ function blockHeight(blocks, block, extensions) {
 
   let statements = 0;
   for (const [name, input] of Object.entries(block.inputs || {})) {
-    if (!isStatementInput(name)) continue;
+    if (!isStatementInput(name, entry)) continue;
     statements += 1;
     const first = statementBlockId(input);
     const inner =
-      first && blocks[first] ? stackHeight(blocks, first, extensions) : 0;
+      first && blocks[first]
+        ? stackHeight(blocks, first, extensions, entries)
+        : 0;
     height += Math.max(MIN_STATEMENT_INPUT_HEIGHT, inner - NOTCH_HEIGHT);
   }
 
@@ -289,17 +319,27 @@ function blockHeight(blocks, block, extensions) {
   return height + NOTCH_HEIGHT;
 }
 
-function stackHeight(blocks, firstId, extensions) {
+function stackHeight(blocks, firstId, extensions, entries) {
   let height = 0;
   let first = true;
   let block = blocks[firstId];
   while (block) {
-    const own = blockHeight(blocks, block, extensions);
+    const own = blockHeight(blocks, block, extensions, entries);
     height += first ? own : own - NOTCH_HEIGHT;
     first = false;
     block = block.next ? blocks[block.next] : null;
   }
   return height;
+}
+
+/** Height only, for layout: widths are not needed to stack scripts. */
+function measureHeight(blocks, firstId, catalog) {
+  return stackHeight(
+    blocks,
+    firstId,
+    extensionsFor(catalog),
+    entriesFor(catalog),
+  );
 }
 
 /**
@@ -313,8 +353,8 @@ function stackHeight(blocks, firstId, extensions) {
 export function measureScript(blocks, firstId, catalog) {
   const labels = labelsFor(catalog);
   return {
-    width: stackWidth(blocks, firstId, labels),
-    height: stackHeight(blocks, firstId, extensionsFor(catalog)),
+    width: stackWidth(blocks, firstId, labels, entriesFor(catalog)),
+    height: measureHeight(blocks, firstId, catalog),
   };
 }
 
@@ -334,7 +374,7 @@ export function layoutTarget(target, catalog) {
 
   let cursorY = GRID_OFFSET;
   for (const [id, block] of scripts) {
-    const { height } = measureScript(target.blocks, id, catalog);
+    const height = measureHeight(target.blocks, id, catalog);
     block.x = GRID_OFFSET;
     block.y = cursorY;
     cursorY = block.y + height + MIN_BLOCK_Y;

@@ -78,6 +78,16 @@ test("measures C-blocks with scratch-blocks row metrics", () => {
   );
 });
 
+test("positions an if/else with empty branches from fixed row metrics", () => {
+  const { scripts } = layoutOf(`
+    when greenFlag { if (true) {} else {} }
+    when greenFlag { looks.show(); }
+  `);
+  // Independent of measureScript: hat row plus notch (48 + 8), the if/else
+  // row overlapping that notch (48), and the MIN_BLOCK_Y gap (48).
+  assert.equal(scripts[1].y - scripts[0].y, 152);
+});
+
 test("counts extension blocks as one grid unit taller", () => {
   assert.equal(scriptHeight("looks.show();"), 104);
   assert.equal(scriptHeight("pen.penDown();"), 112);

@@ -45,7 +45,8 @@ export function mergePrograms(
 
   for (const { ast, file } of entries) {
     if (ast.standaloneComments)
-      standaloneComments.push(...ast.standaloneComments);
+      for (const comment of ast.standaloneComments)
+        standaloneComments.push(comment);
     if (ast.tests && ast.tests.length > 0)
       throw new ParseError(
         `Test ${JSON.stringify(ast.tests[0].name)} is declared in a project source. ` +
