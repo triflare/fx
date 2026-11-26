@@ -15,7 +15,7 @@ Testing ships with Fx but starts off. Turn it on once per project:
 fx feature tests enable
 ```
 
-This adds `tests: true` under `fx:` in `fx.yml`. Run `fx feature tests` to see whether testing is on, and `fx feature tests disable` to turn it off again.
+This adds `tests: true` under `fx.features` in `fx.yml`. Run `fx feature tests` to see whether testing is on, and `fx feature tests disable` to turn it off again. Disabling keeps your settings, so re-enabling does not reset them.
 
 Testing is part of Fx itself, so there is nothing to update. `fx feature tests update` tells you that instead of changing a file.
 
@@ -112,17 +112,20 @@ Put the sprite name in front of the block so Fx knows which one to run. If only 
 
 ## Settings
 
-The defaults suit most projects. To change them, add them under `fx.tests`:
+The defaults suit most projects. To change them, add them under `fx.features.tests`:
 
 ```yaml
 fx:
-  tests:
-    pattern: "test/**/*.test.tfx"
-    seed: 12345
-    timeout: 1000
-    ticksPerSecond: 30
-    failOnRuntimeError: true
+  features:
+    tests:
+      pattern: "test/**/*.test.tfx"
+      seed: 12345
+      timeout: 1000
+      ticksPerSecond: 30
+      failOnRuntimeError: true
 ```
+
+The older `fx.tests` location still works; `fx feature migrate` moves it under the central key.
 
 | Setting              | What it does                                                     |
 | -------------------- | ---------------------------------------------------------------- |

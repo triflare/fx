@@ -211,7 +211,7 @@ test("enabling and disabling tests edits fx.yml and keeps comments", () => {
     });
     assert.equal(enabled.changed, true);
     const text = fs.readFileSync(configPath, "utf8");
-    assert.match(text, /fx:\n(?:.*\n)* {2}tests: true\n/);
+    assert.match(text, /fx:\n(?:.*\n)* {2}features:\n {4}tests: true\n/);
     assert.match(text, /# keep this comment/);
     assert.match(text, /# project settings/);
     assert.equal(featureEnabled({ configPath, name: "tests" }), true);
@@ -222,10 +222,7 @@ test("enabling and disabling tests edits fx.yml and keeps comments", () => {
       name: "tests",
     });
     assert.equal(disabled.changed, true);
-    assert.equal(
-      disabled.warning,
-      "Testing will become a core feature in a future version.",
-    );
+    assert.equal(disabled.warning, null);
     assert.match(fs.readFileSync(configPath, "utf8"), /tests: false/);
     assert.equal(
       disableFeature({ configPath, configDir: dir, name: "tests" }).changed,
@@ -259,8 +256,8 @@ test("fx feature tests reports status, enables, warns on disable and refuses upd
     const disabled = run(["feature", "tests", "disable", "--yes"], dir);
     assert.equal(disabled.status, 0, disabled.stderr);
     assert.match(
-      disabled.stderr,
-      /Testing will become a core feature in a future version\./,
+      fs.readFileSync(path.join(dir, "fx.yml"), "utf8"),
+      /tests: false/,
     );
 
     const update = run(["feature", "tests", "update"], dir);
@@ -997,7 +994,7 @@ test("parenthesized assertion operands remain expressions", () => {
     assert.equal(statement.type, "BlockCall");
 });
 
-test("disabling tests preserves comments before the next key", () => {
+test("disabling tests keeps its options and comments for re-enabling", () => {
   const dir = tmpProject();
   try {
     const configPath = path.join(dir, "fx.yml");
@@ -1006,10 +1003,23 @@ test("disabling tests preserves comments before the next key", () => {
       "fx:\n  tests:\n    timeout: 500\n    # indented trailing comment\n  # next setting\n  partialSprites: false\n",
     );
     disableFeature({ configPath, configDir: dir, name: "tests" });
-    assert.equal(
-      fs.readFileSync(configPath, "utf8"),
-      "fx:\n  tests: false\n    # indented trailing comment\n  # next setting\n  partialSprites: false\n",
+    const text = fs.readFileSync(configPath, "utf8");
+    assert.match(
+      text,
+      /features:\n {4}tests:\n {6}timeout: 500\n {6}enabled: false\n/,
     );
+    assert.match(text, /# indented trailing comment/);
+    assert.match(text, /# next setting/);
+    assert.equal(
+      parseConfig(text).fx.tests,
+      false,
+      "the new key turns testing off",
+    );
+
+    enableFeature({ configPath, configDir: dir, name: "tests" });
+    const enabled = parseConfig(fs.readFileSync(configPath, "utf8")).fx.tests;
+    assert.equal(enabled.enabled, true);
+    assert.equal(enabled.timeout, 500, "the timeout survives a disable/enable");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

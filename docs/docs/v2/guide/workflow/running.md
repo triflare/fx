@@ -15,7 +15,7 @@ Running ships with Fx but starts off. Turn it on once per project:
 fx feature run enable
 ```
 
-This adds `run: true` under `fx:` in `fx.yml`. The `run.*` blocks are only compiled and executed by `fx run`; `fx build` ignores them. Run `fx feature run` to see whether running is on, and `fx feature run disable` to turn it off again.
+This adds `run: true` under `fx.features` in `fx.yml`. The `run.*` blocks are only compiled and executed by `fx run`; `fx build` ignores them. Run `fx feature run` to see whether running is on, and `fx feature run disable` to turn it off again. Disabling keeps your settings, so re-enabling does not reset them.
 
 Running is part of Fx itself, so there is nothing to update. `fx feature run update` tells you that instead of changing a file.
 
@@ -78,17 +78,20 @@ sprite "Thing" {
 
 ## Settings
 
-The defaults suit most projects. To change them, add them under `fx.run`:
+The defaults suit most projects. To change them, add them under `fx.features.run`:
 
 ```yaml
 fx:
-  run:
-    pattern: "run/**/*.run.tfx"
-    seed: 12345
-    timeout: 5000
-    ticksPerSecond: 30
-    failOnRuntimeError: true
+  features:
+    run:
+      pattern: "run/**/*.run.tfx"
+      seed: 12345
+      timeout: 5000
+      ticksPerSecond: 30
+      failOnRuntimeError: true
 ```
+
+The older `fx.run` location still works; `fx feature migrate` moves it under the central key.
 
 | Setting              | What it does                                                       |
 | -------------------- | ------------------------------------------------------------------ |
@@ -119,7 +122,7 @@ fx run --allow-project-extensions
 
 | Option                       | What it does                                                  |
 | ---------------------------- | ------------------------------------------------------------- |
-| `--timeout`                  | Overrides `fx.run.timeout` for this run.                      |
+| `--timeout`                  | Overrides `fx.features.run.timeout` for this run.             |
 | `--seed`                     | Uses a different seed for this run.                           |
 | `--ticks-per-second`         | Overrides the simulated frame rate for this run.              |
 | `--allow-project-extensions` | Trusts and loads this project's extensions for this run.      |

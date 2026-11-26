@@ -21,6 +21,19 @@ You can also pass a URL:
 fx vendor add https://example.com/my-extension.js --as my-extension
 ```
 
+Extensions hosted on [Triflare Marketplace](https://marketplace.sdisk.us/) can be
+installed by package name, with an optional version or dist-tag:
+
+```bash
+fx vendor add marketplace:@handle/extension
+fx vendor add marketplace:@handle/extension@1.2.3
+fx vendor add marketplace:@handle/extension@beta
+```
+
+The command pins the resolved release in `fx.yml` and `fx.lock`, so later builds
+do not depend on the marketplace. See [Vendoring
+extensions](/guide/extensions/vendoring#add-an-extension) for details.
+
 This copies the extension's source into the project's vendor folder, records its SHA-256 in `fx.lock`, and adds it under `vendor:` in `fx.yml`. Add several extensions by running the command several times, or edit `fx.yml` directly:
 
 ```yaml

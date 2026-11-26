@@ -74,8 +74,11 @@ When a sprite grows large, you can move part of it to another file with a partia
 
 ```yaml
 fx:
-  partialSprites: true
+  features:
+    partialSprites: true
 ```
+
+`fx feature partialSprites enable` writes the same setting.
 
 Then add a `partial sprite` block with the same name in another file:
 

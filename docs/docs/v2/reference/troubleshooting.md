@@ -54,7 +54,8 @@ Add this to `fx.yml`:
 
 ```yaml
 fx:
-  partialSprites: true
+  features:
+    partialSprites: true
 ```
 
 **`A project may only declare one stage`**
@@ -160,9 +161,9 @@ The lock is working as intended: the upstream file changed. Review the diff from
 
 ## Features
 
-**`Unknown feature "x". Available features: temporaryvariables.`**
+**`Unknown feature "x". Available features: ...`**
 
-Check the feature name. `fx feature temporaryvariables enable` is the only feature today.
+Check the feature name. Run `fx feature list` to see every registered feature. The current names are `partialSprites`, `run`, `temporaryvariables`, and `tests`.
 
 **`... is not enabled. Run "fx feature <name> enable" first.`**
 

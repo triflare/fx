@@ -7,6 +7,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { build } from "../src/build.js";
+import { addVendor } from "../src/cli/commands/vendor/add.js";
+import { vendorOutdatedCommand } from "../src/cli/commands/vendor/outdated.js";
+import { vendorUpdateCommand } from "../src/cli/commands/vendor/update.js";
 import { loadProjectState } from "../src/cli/context.js";
 import { loadConfigFrom, parseConfig } from "../src/config.js";
 import {
@@ -15,6 +18,10 @@ import {
   removeVendorEntry,
 } from "../src/config-edit.js";
 import { readExtensionDataUri } from "../src/extensions.js";
+import {
+  parseMarketplaceSource,
+  resolveMarketplaceExtension,
+} from "../src/marketplace.js";
 import { unzipSync } from "../src/sb3.js";
 import {
   VendorError,
@@ -101,6 +108,436 @@ function run(args, cwd) {
     encoding: "utf8",
   });
 }
+
+function jsonResponse(data, { status = 200, statusText = "OK" } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText,
+    headers: { get: () => null },
+    json: async () => data,
+  };
+}
+
+function binaryResponse(buffer) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: () => null },
+    arrayBuffer: async () => buffer,
+  };
+}
+
+test("parses marketplace sources with a version or dist-tag", () => {
+  assert.deepEqual(parseMarketplaceSource("marketplace:@handle/extension"), {
+    namespace: "handle",
+    id: "extension",
+    ref: "latest",
+    package: "@handle/extension",
+  });
+  assert.equal(
+    parseMarketplaceSource("marketplace:@handle/extension@beta").ref,
+    "beta",
+  );
+  assert.equal(
+    parseMarketplaceSource("marketplace:@handle/extension@1.2.3-alpha.1").ref,
+    "1.2.3-alpha.1",
+  );
+  assert.throws(
+    () => parseMarketplaceSource("marketplace:handle/extension"),
+    /Invalid marketplace source/,
+  );
+  assert.throws(
+    () => parseMarketplaceSource("marketplace:@handle/extension@"),
+    /Invalid marketplace source/,
+  );
+});
+
+test("resolves marketplace versions and verifies the registry digest", async () => {
+  const digest = sha256(Buffer.from(SIGNALS));
+  const requests = [];
+  const fetchImpl = async (url) => {
+    requests.push(url);
+    if (url.endsWith("/versions/beta")) {
+      return jsonResponse({
+        version: "1.2.3-beta.1",
+        status: "published",
+        dist: {
+          downloadUrl: "https://marketplace.test/ext/download",
+          digest: `sha256:${digest}`,
+        },
+      });
+    }
+    return binaryResponse(Buffer.from(SIGNALS));
+  };
+
+  const resolved = await resolveMarketplaceExtension({
+    source: "marketplace:@handle/signals@beta",
+    fetchImpl,
+    apiBase: "https://marketplace.test/api/v1",
+  });
+  assert.equal(
+    requests[0],
+    "https://marketplace.test/api/v1/@handle/signals/versions/beta",
+  );
+  assert.equal(resolved.version, "1.2.3-beta.1");
+  assert.equal(resolved.downloadUrl, "https://marketplace.test/ext/download");
+  assert.equal(resolved.sha256, digest);
+  assert.deepEqual(resolved.marketplace, {
+    package: "@handle/signals",
+    version: "1.2.3-beta.1",
+    ref: "beta",
+  });
+  assert.deepEqual(resolved.buffer, Buffer.from(SIGNALS));
+});
+
+test("marketplace resolution rejects missing, unpublished, and mismatched versions", async () => {
+  await assert.rejects(
+    resolveMarketplaceExtension({
+      source: "marketplace:@handle/signals@missing",
+      fetchImpl: async () =>
+        jsonResponse({}, { status: 404, statusText: "Not Found" }),
+    }),
+    /could not find @handle\/signals@missing/,
+  );
+
+  await assert.rejects(
+    resolveMarketplaceExtension({
+      source: "marketplace:@handle/signals",
+      fetchImpl: async () =>
+        jsonResponse({
+          version: "1.0.0",
+          status: "yanked",
+          dist: {
+            downloadUrl: "https://marketplace.test/ext/download",
+            digest: `sha256:${sha256(Buffer.from(SIGNALS))}`,
+          },
+        }),
+    }),
+    /is yanked .*only published versions can be vendored/,
+  );
+
+  await assert.rejects(
+    resolveMarketplaceExtension({
+      source: "marketplace:@handle/signals",
+      fetchImpl: async (url) =>
+        url.endsWith("/download")
+          ? binaryResponse(Buffer.from(SIGNALS))
+          : jsonResponse({
+              version: "1.0.0",
+              status: "published",
+              dist: {
+                downloadUrl: "https://marketplace.test/ext/download",
+                digest: `sha256:${"0".repeat(64)}`,
+              },
+            }),
+    }),
+    /did not match the SHA-256/,
+  );
+});
+
+test("marketplace add pins the resolved URL and records provenance", async () => {
+  const dir = tmp();
+  write(path.join(dir, "fx.yml"), 'project:\n  name: "Marketplace"\n');
+  write(path.join(dir, "stage.tfx"), "stage {\n}\n");
+  const digest = sha256(Buffer.from(SIGNALS));
+  const fetchImpl = async (url) =>
+    url.endsWith("/download")
+      ? binaryResponse(Buffer.from(SIGNALS))
+      : jsonResponse({
+          version: "1.1.0",
+          status: "published",
+          dist: {
+            downloadUrl:
+              "https://marketplace.test/api/v1/@handle/signals/versions/1.1.0/download",
+            digest: `sha256:${digest}`,
+          },
+        });
+  const reporter = { info() {}, success() {}, warn() {} };
+  try {
+    const result = await addVendor({
+      source: "marketplace:@handle/signals",
+      options: {},
+      cwd: dir,
+      reporter,
+      product: { command: "fx" },
+      fetchImpl,
+    });
+    assert.equal(result.name, "signals");
+    assert.equal(
+      result.source,
+      "https://marketplace.test/api/v1/@handle/signals/versions/1.1.0/download",
+    );
+    const config = fs.readFileSync(path.join(dir, "fx.yml"), "utf8");
+    assert.match(config, /versions\/1\.1\.0\/download/);
+    assert.doesNotMatch(config, /marketplace:/);
+    const lock = readLock(dir);
+    assert.deepEqual(lock.extensions.signals.marketplace, {
+      package: "@handle/signals",
+      version: "1.1.0",
+      ref: "latest",
+    });
+    assert.equal(lock.extensions.signals.sha256, digest);
+    assert.deepEqual(
+      fs.readFileSync(path.join(dir, "extensions", "signals.js")),
+      Buffer.from(SIGNALS),
+    );
+
+    const checked = await loadVendorExtensions({
+      configDir: dir,
+      config: loadConfigFrom(dir),
+    });
+    assert.deepEqual(checked.unsandboxed, []);
+    assert.equal(checked.warnings.length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function marketplaceFetch(version, content) {
+  const digest = sha256(Buffer.from(content));
+  return async (url) => {
+    if (url.endsWith("/download")) return binaryResponse(Buffer.from(content));
+    return jsonResponse({
+      version,
+      status: "published",
+      dist: {
+        downloadUrl: `https://marketplace.test/api/v1/@handle/signals/versions/${version}/download`,
+        digest: `sha256:${digest}`,
+      },
+    });
+  };
+}
+
+function marketplaceResolver(fetchImpl) {
+  return async (entry, lockEntry) => {
+    const marketplace = lockEntry?.marketplace;
+    if (!marketplace) return null;
+    return resolveMarketplaceExtension({
+      source: `marketplace:${marketplace.package}@${marketplace.ref}`,
+      fetchImpl,
+    });
+  };
+}
+
+test("vendor update re-resolves marketplace dist-tags and moves the pin", async () => {
+  const dir = tmp();
+  const configPath = path.join(dir, "fx.yml");
+  write(configPath, 'project:\n  name: "Marketplace"\n');
+  write(path.join(dir, "stage.tfx"), "stage {\n}\n");
+  const v1 = SIGNALS;
+  const v2 = `${SIGNALS}\n// version two\n`;
+  const reporter = { info() {}, success() {}, warn() {} };
+  try {
+    await addVendor({
+      source: "marketplace:@handle/signals",
+      options: {},
+      cwd: dir,
+      reporter,
+      product: { command: "fx" },
+      fetchImpl: marketplaceFetch("1.0.0", v1),
+    });
+    const v2Source =
+      "https://marketplace.test/api/v1/@handle/signals/versions/2.0.0/download";
+
+    const outdated = await outdatedVendor({
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      resolveEntry: marketplaceResolver(marketplaceFetch("2.0.0", v2)),
+    });
+    assert.equal(outdated[0].status, "outdated");
+    assert.equal(outdated[0].previousVersion, "1.0.0");
+    assert.equal(outdated[0].version, "2.0.0");
+
+    const preview = await updateVendor({
+      configPath,
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      write: false,
+      resolveEntry: marketplaceResolver(marketplaceFetch("2.0.0", v2)),
+    });
+    assert.equal(preview.updated, 1);
+    assert.equal(preview.changed, 1);
+    assert.equal(preview.entries[0].versionChanged, true);
+    assert.equal(preview.entries[0].previousVersion, "1.0.0");
+    assert.equal(preview.entries[0].version, "2.0.0");
+    assert.equal(readLock(dir).extensions.signals.marketplace.version, "1.0.0");
+    assert.match(fs.readFileSync(configPath, "utf8"), /1\.0\.0\/download/);
+    assert.deepEqual(
+      fs.readFileSync(path.join(dir, "extensions", "signals.js")),
+      Buffer.from(v1),
+    );
+
+    const updated = await updateVendor({
+      configPath,
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      resolveEntry: marketplaceResolver(marketplaceFetch("2.0.0", v2)),
+    });
+    assert.equal(updated.updated, 1);
+    assert.ok(fs.readFileSync(configPath, "utf8").includes(v2Source));
+    const lock = readLock(dir);
+    assert.equal(lock.extensions.signals.source, v2Source);
+    assert.deepEqual(lock.extensions.signals.marketplace, {
+      package: "@handle/signals",
+      version: "2.0.0",
+      ref: "latest",
+    });
+    assert.deepEqual(
+      fs.readFileSync(path.join(dir, "extensions", "signals.js")),
+      Buffer.from(v2),
+    );
+    assert.equal(
+      verifyVendor({ configDir: dir, config: loadConfigFrom(dir) }).ok,
+      true,
+    );
+
+    const again = await updateVendor({
+      configPath,
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      resolveEntry: marketplaceResolver(marketplaceFetch("2.0.0", v2)),
+    });
+    assert.equal(again.updated, 0);
+    assert.equal(again.changed, 0);
+    assert.equal(again.entries[0].versionChanged, false);
+    const current = await outdatedVendor({
+      configDir: dir,
+      config: loadConfigFrom(dir),
+      resolveEntry: marketplaceResolver(marketplaceFetch("2.0.0", v2)),
+    });
+    assert.equal(current[0].status, "current");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("vendor update CLI re-resolves a marketplace dist-tag", async () => {
+  const dir = tmp();
+  const configPath = path.join(dir, "fx.yml");
+  write(configPath, 'project:\n  name: "Marketplace"\n');
+  write(path.join(dir, "stage.tfx"), "stage {\n}\n");
+  const v1 = SIGNALS;
+  const v2 = `${SIGNALS}\n// version two\n`;
+  const reporter = { info() {}, success() {}, warn() {} };
+  const messages = [];
+  const cliReporter = {
+    info: (message) => messages.push(message),
+    success: (message) => messages.push(message),
+    text: (message) => messages.push(message),
+    item() {},
+    warn() {},
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    await addVendor({
+      source: "marketplace:@handle/signals",
+      options: {},
+      cwd: dir,
+      reporter,
+      product: { command: "fx" },
+      fetchImpl: marketplaceFetch("1.0.0", v1),
+    });
+    globalThis.fetch = marketplaceFetch("2.0.0", v2);
+    const checked = await vendorOutdatedCommand.run({
+      cwd: dir,
+      reporter: cliReporter,
+      product: { command: "fx" },
+    });
+    assert.equal(checked.data[0].status, "outdated");
+    assert.match(messages.join("\n"), /signals: 1\.0\.0 -> 2\.0\.0/);
+    messages.length = 0;
+    const result = await vendorUpdateCommand.run({
+      args: [],
+      options: {},
+      cwd: dir,
+      reporter: cliReporter,
+      product: { command: "fx" },
+    });
+    assert.equal(result.updated, 1);
+    assert.match(messages.join("\n"), /signals: 1\.0\.0 -> 2\.0\.0/);
+    assert.ok(
+      fs.readFileSync(configPath, "utf8").includes("versions/2.0.0/download"),
+    );
+    assert.equal(readLock(dir).extensions.signals.marketplace.version, "2.0.0");
+    assert.deepEqual(
+      fs.readFileSync(path.join(dir, "extensions", "signals.js")),
+      Buffer.from(v2),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("vendor update follows a changed source instead of the stale Marketplace pin", async () => {
+  const dir = tmp();
+  const configPath = path.join(dir, "fx.yml");
+  write(configPath, 'project:\n  name: "Marketplace"\n');
+  write(path.join(dir, "stage.tfx"), "stage {\n}\n");
+  const v1 = SIGNALS;
+  const mirror = `${SIGNALS}\n// mirror\n`;
+  const mirrorUrl = "https://mirror.test/signals.js";
+  const reporter = { info() {}, success() {}, warn() {} };
+  const messages = [];
+  const cliReporter = {
+    info: (message) => messages.push(message),
+    success: (message) => messages.push(message),
+    text: (message) => messages.push(message),
+    item() {},
+    warn() {},
+  };
+  const fetchImpl = async (url) => {
+    if (String(url).startsWith(mirrorUrl))
+      return binaryResponse(Buffer.from(mirror));
+    return marketplaceFetch("1.0.0", v1)(url);
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    await addVendor({
+      source: "marketplace:@handle/signals",
+      options: {},
+      cwd: dir,
+      reporter,
+      product: { command: "fx" },
+      fetchImpl: marketplaceFetch("1.0.0", v1),
+    });
+    write(
+      configPath,
+      `project:\n  name: "Marketplace"\nvendor:\n  signals: ${mirrorUrl}\n`,
+    );
+    globalThis.fetch = fetchImpl;
+    const checked = await vendorOutdatedCommand.run({
+      cwd: dir,
+      reporter: cliReporter,
+      product: { command: "fx" },
+    });
+    assert.equal(checked.data[0].status, "outdated");
+    const result = await vendorUpdateCommand.run({
+      args: [],
+      options: {},
+      cwd: dir,
+      reporter: cliReporter,
+      product: { command: "fx" },
+    });
+    assert.equal(result.updated, 1);
+    assert.match(
+      fs.readFileSync(configPath, "utf8"),
+      /mirror\.test\/signals\.js/,
+    );
+    const lock = readLock(dir);
+    assert.equal(lock.extensions.signals.source, mirrorUrl);
+    assert.equal(lock.extensions.signals.marketplace, null);
+    assert.deepEqual(
+      fs.readFileSync(path.join(dir, "extensions", "signals.js")),
+      Buffer.from(mirror),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("parses vendor entries in load order with shorthand and options", () => {
   const config = parseConfig(`

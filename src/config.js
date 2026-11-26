@@ -12,6 +12,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { configFilename, configFilenames, productName } from "./brand.js";
 import { DEFAULT_LINT, normalizeLintConfig } from "./lint/config.js";
+import { FEATURES } from "./feature-registry.js";
 
 export const DEFAULT_PROJECT = {
   name: `${productName()} Project`,
@@ -57,6 +58,7 @@ export const DEFAULT_RUN = {
  * Kept in a separate top-level `fx:` block in fx.yml.
  */
 export const DEFAULT_FX = {
+  features: {},
   partialSprites: false,
   vendorDir: "extensions",
   tests: false,
@@ -83,7 +85,7 @@ export function normalizeTestConfig(value) {
     );
 
   const unknown = Object.keys(value).filter(
-    (key) => !Object.hasOwn(DEFAULT_TESTS, key),
+    (key) => key !== "enabled" && !Object.hasOwn(DEFAULT_TESTS, key),
   );
   if (unknown.length)
     throw new Error(
@@ -91,6 +93,10 @@ export function normalizeTestConfig(value) {
         .map((key) => `"${key}"`)
         .join(", ")}`,
     );
+
+  // A mapping may stay in the file while the feature is off, so switching it
+  // back on does not lose the configured pattern, timeout, and so on.
+  if (value.enabled === false) return false;
 
   const tests = { enabled: true, ...DEFAULT_TESTS };
   if (value.pattern != null) {
@@ -145,7 +151,7 @@ export function normalizeRunConfig(value) {
     );
 
   const unknown = Object.keys(value).filter(
-    (key) => !Object.hasOwn(DEFAULT_RUN, key),
+    (key) => key !== "enabled" && !Object.hasOwn(DEFAULT_RUN, key),
   );
   if (unknown.length)
     throw new Error(
@@ -153,6 +159,9 @@ export function normalizeRunConfig(value) {
         .map((key) => `"${key}"`)
         .join(", ")}`,
     );
+
+  // See normalizeTestConfig: a disabled mapping keeps its settings.
+  if (value.enabled === false) return false;
 
   const run = { enabled: true, ...DEFAULT_RUN };
   if (value.pattern != null) {
@@ -556,21 +565,140 @@ export function normalizeProject(raw = {}) {
 }
 
 /**
+ * Normalize the central `fx.features` mapping. The mapping keeps each
+ * feature's own value so settings survive a disable/enable cycle.
+ *
+ * @param {unknown} raw
+ * @returns {Record<string, unknown>}
+ */
+export function normalizeFeatureSettings(raw = {}) {
+  if (raw == null) return {};
+  if (!isPlainObject(raw))
+    throw new Error(`${configFilename()}: fx.features must be a mapping`);
+  return { ...raw };
+}
+
+/** Whether a feature setting turns the feature on. */
+function isFeatureOn(value) {
+  if (value == null || value === false) return false;
+  if (isPlainObject(value)) return value.enabled !== false;
+  return Boolean(value);
+}
+
+/**
+ * Normalize the `partialSprites` setting. It accepts a boolean or a mapping
+ * with `enabled`, matching the other feature switches.
+ */
+export function normalizePartialSprites(value) {
+  return isFeatureOn(value);
+}
+
+/**
+ * Resolve an extension-backed feature's project file from its setting.
+ *
+ * `true` uses the bundled filename under the project's vendor directory; a
+ * string or `{ file }` pins an explicit path.
+ */
+export function featureEntryFile(name, value, vendorDir = DEFAULT_VENDOR_DIR) {
+  const feature = FEATURES[name];
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (isPlainObject(value) && typeof value.file === "string" && value.file)
+    return value.file.trim();
+  if (value === true && feature?.filename)
+    return `./${String(vendorDir || DEFAULT_VENDOR_DIR)}/${feature.filename}`;
+  if (feature)
+    throw new Error(
+      `${configFilename()}: fx.features.${name} must be true, false, a file path, or { file: "<path>" }`,
+    );
+  throw new Error(
+    `${configFilename()}: fx.features.${name} is not a known feature and needs a file path`,
+  );
+}
+
+/**
+ * Extension entries declared under `fx.features` (core features never appear
+ * here). Entries for unknown names are accepted when they name a file, so
+ * project-local extensions keep working under the new key.
+ *
+ * @param {Record<string, unknown>} [settings]
+ * @param {string} [vendorDir]
+ * @returns {Array<{name: string, file: string}>}
+ */
+export function featureEntriesFromSettings(
+  settings = {},
+  vendorDir = DEFAULT_VENDOR_DIR,
+) {
+  const entries = [];
+  for (const [name, value] of Object.entries(settings || {})) {
+    if (FEATURES[name]?.core || !isFeatureOn(value)) continue;
+    entries.push({ name, file: featureEntryFile(name, value, vendorDir) });
+  }
+  return entries;
+}
+
+/**
+ * Names that `fx.features` explicitly switches off. A matching legacy entry is
+ * dropped, so the effective feature list never contains a disabled feature.
+ */
+export function disabledFeatureNames(settings = {}) {
+  return Object.entries(settings || {})
+    .filter(([, value]) => !isFeatureOn(value))
+    .map(([name]) => name);
+}
+
+/**
+ * Merge extension entries, with `override` (the new key) winning over `base`
+ * (the legacy top-level `features:` list). Names in `disabled` are removed
+ * from `base` entirely, so an explicit `false` still wins.
+ */
+export function mergeFeatureEntries(base = [], override = [], disabled = []) {
+  const off = new Set(disabled.map(String));
+  const merged = base
+    .filter((entry) => !off.has(entry.name))
+    .map((entry) => ({ ...entry }));
+  for (const entry of override) {
+    const index = merged.findIndex(
+      (candidate) => candidate.name === entry.name,
+    );
+    if (index === -1) merged.push({ ...entry });
+    else merged[index] = { ...entry };
+  }
+  return merged;
+}
+
+/**
  * @param {object} raw parsed YAML `fx` mapping
  * @returns {typeof DEFAULT_FX}
  */
 export function normalizeFx(raw = {}) {
   const fx = { ...DEFAULT_FX, lint: { ...DEFAULT_LINT, rules: {} } };
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    if (raw.partialSprites != null)
-      fx.partialSprites = Boolean(raw.partialSprites);
+    if (raw.features !== undefined)
+      fx.features = normalizeFeatureSettings(raw.features);
+    const features = fx.features || {};
+
     if (raw.vendorDir != null) {
       if (typeof raw.vendorDir !== "string" || raw.vendorDir.trim() === "")
         throw new Error(`${configFilename()}: fx.vendorDir must be a path`);
       fx.vendorDir = raw.vendorDir.trim();
     }
-    if (raw.tests !== undefined) fx.tests = normalizeTestConfig(raw.tests);
-    if (raw.run !== undefined) fx.run = normalizeRunConfig(raw.run);
+
+    // `fx.features` is the canonical switch. When it names a feature, it wins
+    // over the older `fx.<name>` setting; otherwise the old setting still
+    // applies, so existing projects keep working unchanged.
+    if (Object.hasOwn(features, "tests"))
+      fx.tests = normalizeTestConfig(features.tests);
+    else if (raw.tests !== undefined) fx.tests = normalizeTestConfig(raw.tests);
+
+    if (Object.hasOwn(features, "run"))
+      fx.run = normalizeRunConfig(features.run);
+    else if (raw.run !== undefined) fx.run = normalizeRunConfig(raw.run);
+
+    if (Object.hasOwn(features, "partialSprites"))
+      fx.partialSprites = normalizePartialSprites(features.partialSprites);
+    else if (raw.partialSprites != null)
+      fx.partialSprites = Boolean(raw.partialSprites);
+
     fx.lint = normalizeLintConfig(
       raw.lint,
       (message) => new Error(`${configFilename()}: ${message}`),
@@ -605,7 +733,11 @@ export function parseConfig(text) {
     fx,
     package: normalizePackage(raw.package || {}),
     vendor: normalizeVendor(raw.vendor || {}),
-    features: normalizeFeatures(raw.features || {}),
+    features: mergeFeatureEntries(
+      normalizeFeatures(raw.features || {}),
+      featureEntriesFromSettings(fx.features, fx.vendorDir),
+      disabledFeatureNames(fx.features),
+    ),
     vendorDir: fx.vendorDir,
     raw,
   };

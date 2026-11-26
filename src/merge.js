@@ -39,10 +39,14 @@ export function mergePrograms(
 ) {
   let stage = null;
   const topItems = [];
+  const standaloneComments = [];
   /** @type {Map<string, {name: string, loc: object, base: object|null, fragments: object[], files: string[]}>} */
   const groups = new Map();
 
   for (const { ast, file } of entries) {
+    if (ast.standaloneComments)
+      for (const comment of ast.standaloneComments)
+        standaloneComments.push(comment);
     if (ast.tests && ast.tests.length > 0)
       throw new ParseError(
         `Test ${JSON.stringify(ast.tests[0].name)} is declared in a project source. ` +
@@ -112,5 +116,5 @@ export function mergePrograms(
     };
   });
 
-  return { type: "Program", stage, sprites, topItems };
+  return { type: "Program", stage, sprites, topItems, standaloneComments };
 }
