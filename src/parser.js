@@ -5,8 +5,9 @@
  * Triflare Fx is intentionally context-free: keywords are recognised by shape
  * (`sprite "..."`, `when <event>`, `let ...`) rather than being reserved words.
  */
-import { tokenize } from "./lexer.js";
+import { tokenizeWithComments } from "./lexer.js";
 import { ParseError } from "./errors.js";
+import { attachComments } from "./comments.js";
 
 const ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/="]);
 const PROPERTY_KEYS = new Set(["layer", "costumes", "sounds"]);
@@ -22,6 +23,15 @@ class Parser {
     this.source = source;
     this.file = file;
     this.pos = 0;
+    // Brace tokens for every body, kept out of the AST so comments can be
+    // placed by source range without changing the node shapes.
+    this.spans = new WeakMap();
+  }
+
+  /** Record the braces surrounding a node's body (and else branch). */
+  span(node, bodyOpen, bodyClose, elseOpen = null, elseClose = null) {
+    this.spans.set(node, { bodyOpen, bodyClose, elseOpen, elseClose });
+    return node;
   }
 
   peek(offset = 0) {
@@ -136,8 +146,8 @@ class Parser {
   parseTestDecl() {
     const tok = this.expect("test");
     const name = this.expectType("string", "a test name string").value;
-    const body = this.parseBlockBody();
-    return { type: "TestDecl", name, body, loc: tok };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span({ type: "TestDecl", name, body, loc: tok }, open, close);
   }
 
   /** `expect <expression>[, "message"];` */
@@ -154,23 +164,31 @@ class Parser {
   parseSprite(partial = false, startTok = null) {
     const tok = this.expect("sprite");
     const name = this.expectType("string", "a sprite name string").value;
-    const { body, open } = this.parseBlockBody(true);
-    return {
-      type: "SpriteDecl",
-      name,
-      body,
-      loc: startTok ?? tok,
-      // Tokens are the brace's position, needed to insert declarations into
-      // the body when the brace is not on the declaration line.
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span(
+      {
+        type: "SpriteDecl",
+        name,
+        body,
+        loc: startTok ?? tok,
+        // Tokens are the brace's position, needed to insert declarations into
+        // the body when the brace is not on the declaration line.
+        open,
+        partial,
+      },
       open,
-      partial,
-    };
+      close,
+    );
   }
 
   parseStage() {
     const tok = this.expect("stage");
-    const { body, open } = this.parseBlockBody(true);
-    return { type: "StageDecl", name: "Stage", body, loc: tok, open };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span(
+      { type: "StageDecl", name: "Stage", body, loc: tok, open },
+      open,
+      close,
+    );
   }
 
   /**
@@ -185,8 +203,8 @@ class Parser {
         this.fail('Unterminated block; expected "}"');
       items.push(this.parseBodyItem());
     }
-    this.expect("}");
-    return withOpen ? { body: items, open } : items;
+    const close = this.expect("}");
+    return withOpen ? { body: items, open, close } : items;
   }
 
   parseBodyItem() {
@@ -345,23 +363,19 @@ class Parser {
       if (!this.eat(",")) break;
     }
     this.expect(")");
-    const body = this.parseBlockBody();
-    return {
-      type: "FunctionDecl",
-      name,
-      params,
-      returns,
-      warp,
-      body,
-      loc: tok,
-    };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span(
+      { type: "FunctionDecl", name, params, returns, warp, body, loc: tok },
+      open,
+      close,
+    );
   }
 
   parseHat() {
     const tok = this.expect("when");
     const event = this.parseCallOrIdentifier();
-    const body = this.parseBlockBody();
-    return { type: "HatDecl", event, body, loc: tok };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span({ type: "HatDecl", event, body, loc: tok }, open, close);
   }
 
   parseProperty() {
@@ -410,17 +424,29 @@ class Parser {
     } else {
       cond = this.parseExpression();
     }
-    const then = this.parseBlockBody();
+    const then = this.parseBlockBody(true);
     let elseBody = null;
+    let elseOpen = null;
+    let elseClose = null;
     if (this.atIdent("else")) {
       this.next();
       if (this.atIdent("if")) {
         elseBody = [this.parseIf()];
       } else {
-        elseBody = this.parseBlockBody();
+        ({
+          body: elseBody,
+          open: elseOpen,
+          close: elseClose,
+        } = this.parseBlockBody(true));
       }
     }
-    return { type: "If", cond, then, else: elseBody, loc: tok };
+    return this.span(
+      { type: "If", cond, then: then.body, else: elseBody, loc: tok },
+      then.open,
+      then.close,
+      elseOpen,
+      elseClose,
+    );
   }
 
   parseRepeat() {
@@ -432,8 +458,8 @@ class Parser {
     } else {
       count = this.parseExpression();
     }
-    const body = this.parseBlockBody();
-    return { type: "Repeat", count, body, loc: tok };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span({ type: "Repeat", count, body, loc: tok }, open, close);
   }
 
   parseWhile() {
@@ -445,14 +471,14 @@ class Parser {
     } else {
       cond = this.parseExpression();
     }
-    const body = this.parseBlockBody();
-    return { type: "While", cond, body, loc: tok };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span({ type: "While", cond, body, loc: tok }, open, close);
   }
 
   parseForever() {
     const tok = this.expect("forever");
-    const body = this.parseBlockBody();
-    return { type: "Forever", body, loc: tok };
+    const { body, open, close } = this.parseBlockBody(true);
+    return this.span({ type: "Forever", body, loc: tok }, open, close);
   }
 
   parseReturn() {
@@ -486,27 +512,43 @@ class Parser {
     }
 
     let body = null;
+    let bodyOpen = null;
+    let bodyClose = null;
     let elseBody = null;
+    let elseOpen = null;
+    let elseClose = null;
     if (this.atPunct("{")) {
-      body = this.parseBlockBody();
+      ({ body, open: bodyOpen, close: bodyClose } = this.parseBlockBody(true));
       if (this.atIdent("else")) {
         this.next();
         if (this.atIdent("if")) elseBody = [this.parseIf()];
-        else elseBody = this.parseBlockBody();
+        else {
+          ({
+            body: elseBody,
+            open: elseOpen,
+            close: elseClose,
+          } = this.parseBlockBody(true));
+        }
       }
       this.eat(";");
     } else {
       this.expect(";");
     }
-    return {
-      type: "BlockCall",
-      name: name.name,
-      segments: name.segments,
-      args,
-      body,
-      else: elseBody,
-      loc: tok,
-    };
+    return this.span(
+      {
+        type: "BlockCall",
+        name: name.name,
+        segments: name.segments,
+        args,
+        body,
+        else: elseBody,
+        loc: tok,
+      },
+      bodyOpen,
+      bodyClose,
+      elseOpen,
+      elseClose,
+    );
   }
 
   parseCallOrIdentifier() {
@@ -708,7 +750,11 @@ class Parser {
  * @param {string} [file]
  */
 export function parse(source, file = "<input>") {
-  return parseTokens(tokenize(source, file), source, file);
+  const { tokens, comments } = tokenizeWithComments(source, file);
+  const parser = new Parser(tokens, source, file);
+  const ast = parser.parse();
+  attachComments(ast, comments, tokens, parser.spans);
+  return ast;
 }
 
 /**
