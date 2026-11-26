@@ -1,3 +1,9 @@
+## [2.2.0-alpha.5](https://github.com/triflare/fx/compare/v2.2.0-alpha.4...v2.2.0-alpha.5) (2026-11-26)
+
+### Features
+
+- enhance comment handling and layout for Scratch projects ([#41](https://github.com/triflare/fx/issues/41)) ([02f3979](https://github.com/triflare/fx/commit/02f397961120204f110638e2a30641361a182b67))
+
 ## [2.2.0-alpha.4](https://github.com/triflare/fx/compare/v2.2.0-alpha.3...v2.2.0-alpha.4) (2026-11-23)
 
 ### Features
