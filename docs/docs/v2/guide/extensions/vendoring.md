@@ -37,6 +37,44 @@ fx vendor add https://example.com/signals.js --as signals
 fx vendor add ./src/mything.js
 ```
 
+To install from [Triflare Marketplace](https://marketplace.sdisk.us/), use the
+`marketplace:` prefix:
+
+```bash
+fx vendor add marketplace:@handle/extension
+fx vendor add marketplace:@handle/extension@1.2.3
+fx vendor add marketplace:@handle/extension@beta
+```
+
+Without a version or dist-tag, the marketplace's `latest` version is used. Fx
+resolves the package once, downloads the compiled file, and verifies it against
+the digest the marketplace reports. `fx.yml` stores the versioned download URL
+and `fx.lock` records the resolved version, source URL, and SHA-256:
+
+```json
+{
+  "extensions": {
+    "extension": {
+      "source": "https://marketplace.sdisk.us/api/v1/@handle/extension/versions/1.2.3/download",
+      "sha256": "…",
+      "marketplace": {
+        "package": "@handle/extension",
+        "version": "1.2.3",
+        "ref": "latest"
+      }
+    }
+  }
+}
+```
+
+Reinstalls use that pinned URL, so builds stay offline and a newer release is
+never picked up implicitly. `fx vendor update` re-resolves the recorded version
+or dist-tag: a tag such as `latest` or `beta` moves to the newest matching
+release, while an exact version stays put. To switch to a different tag or
+version, run `fx vendor add` again with `--force`. `fx vendor outdated` makes
+the same comparison without writing anything. Set `FX_MARKETPLACE_API` to use
+a self-hosted marketplace instance.
+
 | Option          | What it does                                     |
 | --------------- | ------------------------------------------------ |
 | `--as <name>`   | Names the entry. Defaults to the file name stem. |
@@ -45,15 +83,15 @@ fx vendor add ./src/mything.js
 
 ## Keep vendored files up to date
 
-| Command                      | What it does                                                              |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `fx vendor install`          | Restores missing files from `fx.lock`, fetching only what's absent.       |
-| `fx vendor update [name]`    | Re-fetches upstream, writes changed files and `fx.lock`, and shows diffs. |
-| `fx vendor update --dry-run` | Previews the diffs without writing.                                       |
-| `fx vendor outdated`         | Compares upstream sources with `fx.lock`.                                 |
-| `fx vendor verify`           | Checks the files against `fx.lock`, offline.                              |
-| `fx vendor list`             | Lists entries, their files, and their flags.                              |
-| `fx vendor remove <name>`    | Removes the entry, its lock record, and its file.                         |
+| Command                      | What it does                                                             |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `fx vendor install`          | Restores missing files from `fx.lock`, fetching only what's absent.      |
+| `fx vendor update [name]`    | Re-fetches upstream, re-resolves Marketplace dist-tags, and shows diffs. |
+| `fx vendor update --dry-run` | Previews the diffs without writing.                                      |
+| `fx vendor outdated`         | Compares upstream sources and Marketplace dist-tags with `fx.lock`.      |
+| `fx vendor verify`           | Checks the files against `fx.lock`, offline.                             |
+| `fx vendor list`             | Lists entries, their files, and their flags.                             |
+| `fx vendor remove <name>`    | Removes the entry, its lock record, and its file.                        |
 
 `fx vendor verify` exits with status 1 when a file is missing or its hash doesn't match. Use it in CI before packaging.
 

@@ -1,4 +1,8 @@
 import path from "node:path";
+import {
+  isMarketplaceSource,
+  resolveMarketplaceExtension,
+} from "../../../marketplace.js";
 import { defaultVendorName, installVendorEntry } from "../../../vendor.js";
 import { UsageError } from "../../errors.js";
 import {
@@ -14,6 +18,7 @@ export async function addVendor({
   cwd,
   reporter,
   product,
+  fetchImpl,
 }) {
   if (!source) throw new UsageError("vendor add requires a path or URL");
   const configPath = requireConfigPath(cwd, product);
@@ -22,15 +27,24 @@ export async function addVendor({
 
   if (typeof options.as === "string" && options.as.trim() === "")
     throw new UsageError("--as needs a non-empty name");
+  const resolved = isMarketplaceSource(source)
+    ? await resolveMarketplaceExtension({ source, fetchImpl })
+    : null;
   const name =
-    typeof options.as === "string" ? options.as : defaultVendorName(source);
-  const configSource = vendorConfigSource(source, configDir, cwd);
+    typeof options.as === "string"
+      ? options.as
+      : (resolved?.id ?? defaultVendorName(source));
+  const configSource = resolved
+    ? resolved.downloadUrl
+    : vendorConfigSource(source, configDir, cwd);
   const existing = loaded.vendor.find((entry) => entry.name === name);
   if (existing && existing.source !== configSource && !options.force)
     throw new UsageError(
       `A vendored extension named ${JSON.stringify(name)} already exists.`,
       {
-        hint: `run "${product.command} vendor update ${name}" or pass --force to replace it`,
+        hint: resolved
+          ? `pass --force to replace it with ${resolved.package}@${resolved.version}, or choose another name with --as`
+          : `run "${product.command} vendor update ${name}" or pass --force to replace it`,
       },
     );
 
@@ -50,8 +64,18 @@ export async function addVendor({
     vendorDir: path.resolve(configDir, loaded.vendorDir || "extensions"),
     unsandboxed: Boolean(options.unsandboxed) || Boolean(existing?.unsandboxed),
     volatile: existingVolatile,
+    marketplace: resolved?.marketplace,
+    prefetched: resolved
+      ? {
+          buffer: resolved.buffer,
+          etag: resolved.etag,
+          lastModified: resolved.lastModified,
+        }
+      : undefined,
   });
 
+  if (resolved)
+    reporter.info(`Resolved ${source} to ${resolved.package}@${resolved.version}`);
   reporter.success(
     `Vendored ${name} -> ${result.file} (${result.lockEntry.sha256.slice(0, 12)}…)`,
   );
@@ -64,15 +88,17 @@ export async function addVendor({
     source: configSource,
     file: result.file,
     sha256: result.lockEntry.sha256,
+    marketplace: resolved?.marketplace ?? null,
     replaced: Boolean(existing),
   };
 }
 
 export const vendorAddCommand = {
   name: "add",
-  summary: "Vendor an extension by URL or path",
+  summary: "Vendor an extension by URL, path, or Marketplace package",
   description: `Copy an extension into the vendor directory, record its SHA-256 in
-fx.lock, and add it to the project config.`,
+fx.lock, and add it to the project config. Marketplace sources are resolved to a
+pinned download URL first.`,
   arguments: ["<source>"],
   options: [
     { flags: "--as <name>", description: "Name for the vendored extension" },
@@ -85,6 +111,7 @@ fx.lock, and add it to the project config.`,
   examples: [
     "fx vendor add https://example.com/signals.js --as signals",
     "fx vendor add ./src/mything.js",
+    "fx vendor add marketplace:@handle/extension@latest",
   ],
   run(context) {
     return addVendor({

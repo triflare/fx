@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveMarketplaceExtension } from "../../../marketplace.js";
 import { outdatedVendor } from "../../../vendor.js";
 import { UsageError } from "../../errors.js";
 import { outcome } from "../../define-command.js";
@@ -7,7 +8,8 @@ import { loadVendorConfig, requireConfigPath } from "./helpers.js";
 export const vendorOutdatedCommand = {
   name: "outdated",
   summary: "Compare upstream sources with fx.lock",
-  description: "Check whether any vendored extension changed upstream.",
+  description:
+    "Check whether any vendored extension changed upstream or a Marketplace dist-tag points at a newer release.",
   examples: ["fx vendor outdated"],
   async run({ cwd, reporter, product }) {
     const configPath = requireConfigPath(cwd, product);
@@ -16,7 +18,17 @@ export const vendorOutdatedCommand = {
     if (loaded.vendor.length === 0)
       throw new UsageError(`No vendor entries in ${path.basename(configPath)}`);
 
-    const results = await outdatedVendor({ configDir, config: loaded });
+    const results = await outdatedVendor({
+      configDir,
+      config: loaded,
+      resolveEntry: async (entry, lockEntry) => {
+        const marketplace = lockEntry?.marketplace;
+        if (!marketplace) return null;
+        return resolveMarketplaceExtension({
+          source: `marketplace:${marketplace.package}@${marketplace.ref}`,
+        });
+      },
+    });
     let outdated = 0;
     let errors = 0;
     for (const result of results) {
@@ -35,6 +47,14 @@ export const vendorOutdatedCommand = {
             ? "danger"
             : "success";
       reporter.item(result.name, label, { width: 24, tone });
+      if (
+        result.version &&
+        result.previousVersion &&
+        result.version !== result.previousVersion
+      )
+        reporter.info(
+          `${result.name}: ${result.previousVersion} -> ${result.version}`,
+        );
       if (result.error) reporter.warn(result.error);
     }
     if (outdated > 0)

@@ -116,6 +116,19 @@ function looksLikeLockEntry(value) {
   );
 }
 
+/** Normalize marketplace provenance recorded in the lock. */
+function normalizeMarketplaceLock(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const name = value.package ?? value.spec;
+  if (typeof name !== "string" || typeof value.version !== "string")
+    return null;
+  return {
+    package: name,
+    version: value.version,
+    ref: typeof value.ref === "string" ? value.ref : "latest",
+  };
+}
+
 /** Normalize legacy lock-entry spellings into the current shape. */
 function normalizeLockEntry(name, raw) {
   const file = raw.file ?? raw.vendored ?? raw.vendorFile ?? raw.vendor_path;
@@ -137,6 +150,7 @@ function normalizeLockEntry(name, raw) {
     volatile: raw.volatile != null ? Boolean(raw.volatile) : undefined,
     etag: raw.etag ?? null,
     lastModified: raw.lastModified ?? raw.last_modified ?? null,
+    marketplace: normalizeMarketplaceLock(raw.marketplace),
   };
 }
 
@@ -205,6 +219,8 @@ export function writeLock(configDir, lock) {
     };
     if (entry.etag) clean.etag = entry.etag;
     if (entry.lastModified) clean.lastModified = entry.lastModified;
+    const marketplace = normalizeMarketplaceLock(entry.marketplace);
+    if (marketplace) clean.marketplace = marketplace;
     out.extensions[name] = clean;
   }
   writeFileAtomic(file, `${JSON.stringify(out, null, 2)}\n`);
@@ -482,7 +498,7 @@ function writeVendorFile(
 function lockEntryForInstall(name, entry, file, buffer, extra = {}) {
   return {
     name,
-    source: entry.source,
+    source: extra.source ?? entry.source,
     file: posix(file),
     sha256: sha256(buffer),
     fetched: new Date().toISOString(),
@@ -491,6 +507,7 @@ function lockEntryForInstall(name, entry, file, buffer, extra = {}) {
     volatile: Boolean(entry.volatile),
     etag: extra.etag ?? null,
     lastModified: extra.lastModified ?? null,
+    marketplace: normalizeMarketplaceLock(extra.marketplace),
   };
 }
 
@@ -507,6 +524,8 @@ function lockEntryForInstall(name, entry, file, buffer, extra = {}) {
  * @param {typeof fetch} [options.fetchImpl]
  * @param {boolean} [options.unsandboxed]
  * @param {boolean} [options.volatile]
+ * @param {{buffer: Buffer, etag?: string|null, lastModified?: string|null}} [options.prefetched]
+ * @param {{package: string, version: string, ref: string}} [options.marketplace]
  * @returns {Promise<{entry: object, lockEntry: object, file: string}>}
  */
 export async function installVendorEntry({
@@ -519,6 +538,8 @@ export async function installVendorEntry({
   fetchImpl,
   unsandboxed,
   volatile,
+  prefetched,
+  marketplace,
 }) {
   const dir = vendorDir
     ? path.resolve(configDir, vendorDir)
@@ -533,13 +554,21 @@ export async function installVendorEntry({
     volatile == null ? entry.volatile || undefined : Boolean(volatile);
 
   let buffer;
-  let extra = {};
-  if (entry.remote) {
+  let extra;
+  if (prefetched) {
+    buffer = prefetched.buffer;
+    extra = {
+      etag: prefetched.etag,
+      lastModified: prefetched.lastModified,
+      marketplace,
+    };
+  } else if (entry.remote) {
     const read = await readEntrySource(entry, configDir, fetchImpl);
     buffer = read.buffer;
-    extra = read.extra;
+    extra = { ...read.extra, marketplace };
   } else {
     buffer = readLocalSource(entry, configDir).buffer;
+    extra = { marketplace };
   }
   const stored = storedContent(entry, buffer);
 
@@ -616,6 +645,7 @@ export async function installVendor({ configDir, config, fetchImpl } = {}) {
           entry,
           file,
           stored,
+          { marketplace: previous?.marketplace },
         );
         results.push({
           name: entry.name,
@@ -653,6 +683,7 @@ export async function installVendor({ configDir, config, fetchImpl } = {}) {
             entry,
             file,
             buffer,
+            { marketplace: previous?.marketplace },
           );
         }
         results.push({ name: entry.name, file, status: "verified" });
@@ -682,7 +713,7 @@ export async function installVendor({ configDir, config, fetchImpl } = {}) {
         entry,
         file,
         read.buffer,
-        read.extra,
+        { ...read.extra, marketplace: previous?.marketplace },
       );
       results.push({ name: entry.name, file, status: "fetched" });
     }
@@ -702,13 +733,19 @@ export async function installVendor({ configDir, config, fetchImpl } = {}) {
 /**
  * Re-fetch remote entries (or re-copy local ones) and update the lock.
  * Returns the changed entries and a textual diff for each.
+ *
+ * `resolveEntry` may return a freshly resolved source for an entry (used by
+ * `vendor update` to re-resolve Marketplace dist-tags). When its download URL
+ * differs from `fx.yml`, the config is updated too.
  */
 export async function updateVendor({
+  configPath,
   configDir,
   config,
   name,
   fetchImpl,
   write = true,
+  resolveEntry,
 } = {}) {
   const entries = config?.vendor || [];
   const dirName = config?.vendorDir || DEFAULT_VENDOR_DIR;
@@ -734,9 +771,20 @@ export async function updateVendor({
     const existed = fs.existsSync(absolute);
     const before = existed ? fs.readFileSync(absolute) : Buffer.alloc(0);
 
+    const resolved =
+      typeof resolveEntry === "function"
+        ? await resolveEntry(entry, lockEntry)
+        : null;
     let after;
     let extra = {};
-    if (entry.local || entry.data) {
+    let source = entry.source;
+    let marketplace = lockEntry?.marketplace ?? null;
+    if (resolved) {
+      after = resolved.buffer;
+      extra = { etag: resolved.etag, lastModified: resolved.lastModified };
+      source = resolved.downloadUrl;
+      marketplace = resolved.marketplace;
+    } else if (entry.local || entry.data) {
       after = storedContent(entry, readLocalSource(entry, configDir).buffer);
     } else {
       const read = await readEntrySource(entry, configDir, fetchImpl);
@@ -745,12 +793,19 @@ export async function updateVendor({
     }
 
     const different = !after.equals(before);
-    const sourceChanged = lockEntry?.source !== entry.source;
+    const versionChanged =
+      (marketplace?.version ?? null) !==
+      (lockEntry?.marketplace?.version ?? null);
+    const sourceChanged =
+      lockEntry?.source !== source || entry.source !== source || versionChanged;
     results.push({
       name: entry.name,
       file,
       changed: different,
       sourceChanged,
+      versionChanged,
+      version: marketplace?.version ?? null,
+      previousVersion: lockEntry?.marketplace?.version ?? null,
       diff: different
         ? formatDiff(before.toString("utf8"), after.toString("utf8"), file)
         : "",
@@ -765,6 +820,8 @@ export async function updateVendor({
       before,
       after,
       extra,
+      source,
+      marketplace,
       different,
       lockEntry,
     });
@@ -772,6 +829,9 @@ export async function updateVendor({
 
   if (write && pending.length > 0) {
     const backups = new Map();
+    const configBefore = configPath
+      ? fs.readFileSync(configPath, "utf8")
+      : null;
     try {
       for (const item of pending) {
         if (!item.different) continue;
@@ -783,13 +843,29 @@ export async function updateVendor({
           allowOverwrite: Boolean(item.lockEntry),
         });
       }
+      const configChanges = pending.filter(
+        (item) => item.source !== item.entry.source,
+      );
+      if (configChanges.length > 0 && !configPath)
+        throw new VendorError(
+          `Cannot update ${configChanges[0].entry.name}: no config file was provided`,
+        );
+      for (const item of configChanges)
+        addVendorEntry(configPath, item.entry.name, item.source, {
+          unsandboxed: item.entry.unsandboxed,
+          volatile: item.entry.volatile || undefined,
+        });
       for (const item of pending)
         lock.extensions[item.entry.name] = lockEntryForInstall(
           item.entry.name,
           item.entry,
           item.file,
           item.after,
-          item.extra,
+          {
+            ...item.extra,
+            source: item.source,
+            marketplace: item.marketplace,
+          },
         );
       writeLock(configDir, lock);
     } catch (error) {
@@ -797,11 +873,12 @@ export async function updateVendor({
         if (backup.existed) fs.writeFileSync(absolute, backup.buffer);
         else fs.rmSync(absolute, { force: true });
       }
+      if (configBefore != null) fs.writeFileSync(configPath, configBefore);
       throw error;
     }
   }
 
-  return { entries: results, warnings, changed, lock };
+  return { entries: results, warnings, changed, updated: pending.length, lock };
 }
 
 /**
@@ -894,8 +971,16 @@ export function verifyVendor({ configDir, config } = {}) {
 /**
  * Compare upstream sources with `fx.lock` without writing anything.
  * ETag/Last-Modified are sent when the lock has them.
+ *
+ * `resolveEntry` may return a freshly resolved source (used by
+ * `vendor outdated` to compare Marketplace dist-tags).
  */
-export async function outdatedVendor({ configDir, config, fetchImpl } = {}) {
+export async function outdatedVendor({
+  configDir,
+  config,
+  fetchImpl,
+  resolveEntry,
+} = {}) {
   const entries = config?.vendor || [];
   const dirName = config?.vendorDir || DEFAULT_VENDOR_DIR;
   const vendorDir = path.resolve(configDir, dirName);
@@ -929,6 +1014,28 @@ export async function outdatedVendor({ configDir, config, fetchImpl } = {}) {
     }
 
     try {
+      const resolved =
+        typeof resolveEntry === "function"
+          ? await resolveEntry(entry, lockEntry)
+          : null;
+      if (resolved) {
+        const sameVersion =
+          lockEntry?.marketplace?.version === resolved.marketplace?.version;
+        results.push({
+          name: entry.name,
+          file,
+          status:
+            sameVersion &&
+            lockEntry?.source === resolved.downloadUrl &&
+            lockEntry?.sha256 === resolved.sha256
+              ? "current"
+              : "outdated",
+          version: resolved.marketplace?.version ?? resolved.version ?? null,
+          previousVersion: lockEntry?.marketplace?.version ?? null,
+        });
+        continue;
+      }
+
       const sameSource = lockEntry?.source === entry.source;
       const fetched = await fetchVendorSource(entry.source, {
         fetchImpl,
@@ -1051,6 +1158,7 @@ export async function loadVendorExtensions({
           entry,
           file,
           stored,
+          { marketplace: lockEntry?.marketplace },
         );
         lockChanged.value = true;
       }
@@ -1081,6 +1189,7 @@ export async function loadVendorExtensions({
           entry,
           file,
           buffer,
+          { marketplace: lockEntry?.marketplace },
         );
         lockChanged.value = true;
       }
@@ -1108,7 +1217,7 @@ export async function loadVendorExtensions({
         entry,
         file,
         buffer,
-        read.extra,
+        { ...read.extra, marketplace: lockEntry?.marketplace },
       );
       lockChanged.value = true;
     }

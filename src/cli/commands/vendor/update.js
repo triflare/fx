@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveMarketplaceExtension } from "../../../marketplace.js";
 import { updateVendor } from "../../../vendor.js";
 import { UsageError } from "../../errors.js";
 import { loadVendorConfig, requireConfigPath } from "./helpers.js";
@@ -7,7 +8,8 @@ export const vendorUpdateCommand = {
   name: "update",
   summary: "Update vendored extensions and show diffs",
   description: `Re-fetch upstream sources, update the vendored copies, and show a
-diff for each change. Use --dry-run to preview without writing.`,
+diff for each change. Marketplace entries re-resolve the version or dist-tag
+recorded in fx.lock. Use --dry-run to preview without writing.`,
   arguments: ["[name]"],
   options: [
     { flags: "--dry-run", description: "Show diffs without writing files" },
@@ -26,24 +28,43 @@ diff for each change. Use --dry-run to preview without writing.`,
       config: loaded,
       name: args[0],
       write: !options.dryRun,
+      resolveEntry: async (entry, lockEntry) => {
+        const marketplace = lockEntry?.marketplace;
+        if (!marketplace) return null;
+        return resolveMarketplaceExtension({
+          source: `marketplace:${marketplace.package}@${marketplace.ref}`,
+        });
+      },
     });
     for (const entry of result.entries) {
+      if (entry.versionChanged)
+        reporter.info(
+          `${entry.name}: ${entry.previousVersion} -> ${entry.version}`,
+        );
       if (!entry.changed) {
-        reporter.info(`${entry.name} is up to date`);
+        if (!entry.sourceChanged) reporter.info(`${entry.name} is up to date`);
         continue;
       }
       reporter.text(entry.diff);
     }
-    if (options.dryRun && result.changed > 0)
-      reporter.info(`Dry run: ${result.changed} extension(s) would change`);
-    else if (result.changed > 0)
-      reporter.success(`Updated ${result.changed} extension(s)`);
+    if (options.dryRun && result.updated > 0)
+      reporter.info(`Dry run: ${result.updated} extension(s) would change`);
+    else if (result.updated > 0)
+      reporter.success(`Updated ${result.updated} extension(s)`);
     else reporter.success("Everything is up to date");
 
     return {
       dryRun: Boolean(options.dryRun),
+      updated: result.updated,
       changed: result.changed,
-      entries: result.entries.map(({ name, changed }) => ({ name, changed })),
+      entries: result.entries.map(
+        ({ name, changed, versionChanged, version }) => ({
+          name,
+          changed,
+          versionChanged,
+          version,
+        }),
+      ),
     };
   },
 };
