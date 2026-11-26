@@ -1,3 +1,14 @@
+## [2.3.0-alpha.1](https://github.com/triflare/fx/compare/v2.2.0...v2.3.0-alpha.1) (2026-11-26)
+
+### Features
+
+- add sync script to merge latest stable release into prerelease branches ([f4df225](https://github.com/triflare/fx/commit/f4df2256a65aa50a379d6c97e907ee75cb7bd853))
+- enhance comment handling and layout for Scratch projects ([#41](https://github.com/triflare/fx/issues/41)) ([02f3979](https://github.com/triflare/fx/commit/02f397961120204f110638e2a30641361a182b67))
+
+### Bug Fixes
+
+- adjust git command to avoid identity issues during CI merges ([becc8ea](https://github.com/triflare/fx/commit/becc8ea5fe513d4001491a9c1df8124a2bf9616a))
+
 ## [2.2.0-alpha.5](https://github.com/triflare/fx/compare/v2.2.0-alpha.4...v2.2.0-alpha.5) (2026-11-26)
 
 ### Features
