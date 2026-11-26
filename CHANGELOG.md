@@ -1,3 +1,9 @@
+## [2.3.0-alpha.2](https://github.com/triflare/fx/compare/v2.3.0-alpha.1...v2.3.0-alpha.2) (2026-11-26)
+
+### Features
+
+- centralize feature management under fx.features ([#42](https://github.com/triflare/fx/issues/42)) ([abb714e](https://github.com/triflare/fx/commit/abb714e8e604a8bd44eefcfa66c16d9b57ae8e5a)), closes [#40](https://github.com/triflare/fx/issues/40)
+
 ## [2.3.0-alpha.1](https://github.com/triflare/fx/compare/v2.2.0...v2.3.0-alpha.1) (2026-11-26)
 
 ### Features
