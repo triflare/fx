@@ -3,8 +3,9 @@
  *
  * The full config loader (`src/config.js`) needs `node:fs` to search for the
  * file, so editors that only have the file's text use this instead. It reads
- * the settings lint diagnostics depend on — `fx.partialSprites`, `fx.lint` and
- * the declared extension names — and ignores everything else.
+ * the settings lint diagnostics depend on — `fx.features` (with the older
+ * `fx.<name>` keys as fallbacks), `fx.lint`, and the declared extension names —
+ * and ignores everything else.
  */
 
 import * as yaml from "js-yaml";
@@ -98,20 +99,40 @@ export function parseProjectConfigText(text) {
     }
   }
 
+  // `fx.features` is the canonical switch; older `fx.<name>` settings still
+  // apply when the new key does not name that feature.
+  const features =
+    fx.features &&
+    typeof fx.features === "object" &&
+    !Array.isArray(fx.features)
+      ? fx.features
+      : {};
+  const setting = (name) =>
+    Object.hasOwn(features, name) ? features[name] : fx[name];
+
   const patternOf = (value, fallback) => {
     if (value === true) return fallback;
     if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (value.enabled === false) return null;
       if (value.pattern === undefined) return fallback;
       if (typeof value.pattern === "string" && value.pattern.trim())
         return value.pattern.trim();
     }
     return null;
   };
-  const testPattern = patternOf(fx.tests, DEFAULT_TEST_PATTERN);
-  const runPattern = patternOf(fx.run, DEFAULT_RUN_PATTERN);
+  const testPattern = patternOf(setting("tests"), DEFAULT_TEST_PATTERN);
+  const runPattern = patternOf(setting("run"), DEFAULT_RUN_PATTERN);
+  const partial = setting("partialSprites");
 
   return {
-    config: { fx: { partialSprites: Boolean(fx.partialSprites) } },
+    config: {
+      fx: {
+        partialSprites:
+          partial != null && typeof partial === "object"
+            ? partial.enabled !== false
+            : Boolean(partial),
+      },
+    },
     lintConfig,
     declaredExtensions: [...declaredExtensions],
     testPattern,

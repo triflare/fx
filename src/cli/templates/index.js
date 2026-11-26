@@ -25,7 +25,8 @@ function configText({ name, width, height, target }) {
     "  turbo: false",
     "  interpolation: true",
     "fx:",
-    "  partialSprites: false",
+    "  features:",
+    "    partialSprites: false",
   ];
   if (target !== "none") {
     lines.push("package:", `  target: ${target}`);

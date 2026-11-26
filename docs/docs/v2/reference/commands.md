@@ -175,17 +175,21 @@ Copies extensions into the vendor directory, records their hashes in `fx.lock`, 
 ### fx feature
 
 ```bash
-fx feature <name> <action> [--force] [--dry-run]
+fx feature [name] [action] [--force] [--dry-run]
+fx feature list
+fx feature migrate [--dry-run]
 ```
 
-Installs, updates, or removes a built-in language feature. Actions are `enable`, `update`, and `disable`.
+Lists, installs, updates, or removes an optional feature. Actions are `enable`, `update`, and `disable`; omit the action for a status report. With no name, `fx feature` lists every registered feature. All switches live under `fx.features` in `fx.yml`.
 
-The `tests` and `run` features are built into Fx rather than vendored: they support `enable`, `disable`, and a status report when the action is omitted. `fx feature tests update` and `fx feature run update` fail because there is no vendored file or lock entry.
+The `partialSprites`, `tests`, and `run` features are built into Fx rather than vendored: they support `enable` and `disable`, and `update` fails because there is no vendored file or lock entry. `temporaryvariables` is extension-backed and supports `update` too.
+
+`fx feature migrate` moves the legacy `fx.tests`, `fx.run`, `fx.partialSprites`, and top-level `features:` settings under `fx.features`, writing a `.bak` copy of the config first.
 
 | Option      | What it does                                          |
 | ----------- | ----------------------------------------------------- |
 | `--force`   | Replaces an installed copy that was edited (`enable`). |
-| `--dry-run` | Previews an update without writing files.             |
+| `--dry-run` | Previews an update or migration without writing files. |
 
 See [Project features](/guide/extensions/features).
 
@@ -203,8 +207,8 @@ Builds the project and runs every test file (`test/**/*.test.tfx` by default), s
 | `-w`, `--watch`  | Re-runs when `.tfx` or `fx.yml` files change.                         |
 | `--run`          | Runs once and exits. This is the default.                             |
 | `--reporter`     | `default`, `verbose`, `dot`, `json`, or `junit`.                      |
-| `--seed`         | Overrides `fx.tests.seed` for this run.                               |
-| `--timeout`      | Overrides `fx.tests.timeout` for this run.                            |
+| `--seed`         | Overrides `fx.features.tests.seed` for this run.                      |
+| `--timeout`      | Overrides `fx.features.tests.timeout` for this run.                   |
 
 Exit codes: `0` all tests passed, `1` a test failed, `2` parse or configuration error, `3` interrupted, `4` invalid usage.
 
@@ -220,8 +224,8 @@ Compiles the project together with its run files, then executes the `main` funct
 
 | Option                       | What it does                                                          |
 | ---------------------------- | --------------------------------------------------------------------- |
-| `--timeout`                  | Overrides `fx.run.timeout` for this run.                             |
-| `--seed`                     | Overrides `fx.run.seed` for this run.                                |
+| `--timeout`                  | Overrides `fx.features.run.timeout` for this run.                    |
+| `--seed`                     | Overrides `fx.features.run.seed` for this run.                       |
 | `--ticks-per-second`         | Overrides the simulated frame rate for this run.                     |
 | `--allow-project-extensions` | Trusts and loads this project's extensions for this run.             |
 | `--allow-external-io`        | Allows network access (`fetch` and `WebSocket`) during a run.         |
