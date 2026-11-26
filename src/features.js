@@ -488,31 +488,49 @@ export async function loadFeatureExtensions({ configDir, config } = {}) {
  * it is changed.
  *
  * @param {{configPath: string, dryRun?: boolean}} options
- * @returns {{migrated: string[], changed: boolean, backup: string|null, diff: string, configPath: string}}
+ * @returns {{migrated: string[], conflicts: string[], changed: boolean, backup: string|null, diff: string, configPath: string}}
  */
 export function migrateFeatureConfig({ configPath, dryRun = false } = {}) {
   const original = fs.readFileSync(configPath, "utf8");
   const loaded = parseConfig(original);
   const rawFx = isPlainObject(loaded.raw?.fx) ? loaded.raw.fx : {};
   const legacyEntries = readTopLevelFeatureEntries(configPath);
+  const coreNames = new Set(coreFeatureNames());
 
-  const declared = new Set();
+  const migrated = new Set();
   const moves = {};
-  for (const name of coreFeatureNames()) {
-    if (!Object.hasOwn(rawFx, name)) continue;
-    declared.add(name);
+  // Top-level entries that can be removed after migration. A core-named entry
+  // stays where it is: writing its file path under `fx.features` would change
+  // the meaning of the key and make the result unloadable.
+  const removable = [];
+  const conflicts = [];
+  const legacyCoreKeys = coreFeatureNames().filter((name) =>
+    Object.hasOwn(rawFx, name),
+  );
+  for (const name of legacyCoreKeys) {
+    migrated.add(name);
     if (readFeatureSetting(configPath, name) === undefined)
       moves[name] = rawFx[name];
   }
   for (const entry of legacyEntries) {
-    declared.add(entry.name);
+    if (coreNames.has(entry.name)) {
+      conflicts.push(entry.name);
+      continue;
+    }
+    migrated.add(entry.name);
+    removable.push(entry.name);
     if (readFeatureSetting(configPath, entry.name) === undefined)
       moves[entry.name] = entry.file;
   }
 
-  if (declared.size === 0)
+  if (
+    Object.keys(moves).length === 0 &&
+    removable.length === 0 &&
+    legacyCoreKeys.length === 0
+  )
     return {
       migrated: [],
+      conflicts,
       changed: false,
       backup: null,
       diff: "",
@@ -532,13 +550,19 @@ export function migrateFeatureConfig({ configPath, dryRun = false } = {}) {
   try {
     for (const [name, value] of Object.entries(moves))
       setFeatureSetting(target, name, value);
-    for (const name of coreFeatureNames())
-      if (Object.hasOwn(rawFx, name)) removeFxKey(target, name);
-    if (legacyEntries.length > 0) removeTopLevelKey(target, "features");
+    for (const name of legacyCoreKeys) removeFxKey(target, name);
+    if (removable.length > 0) {
+      if (removable.length === legacyEntries.length)
+        removeTopLevelKey(target, "features");
+      else for (const name of removable) removeFeatureEntry(target, name);
+    }
 
     const updated = fs.readFileSync(target, "utf8");
+    // Refuse to leave behind a config that the normal loader cannot read.
+    parseConfig(updated);
     return {
-      migrated: [...declared],
+      migrated: [...migrated],
+      conflicts,
       changed: true,
       backup,
       diff: formatDiff(original, updated, path.basename(configPath)),

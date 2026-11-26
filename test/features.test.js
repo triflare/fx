@@ -176,6 +176,81 @@ fx:
   }
 });
 
+test("feature updates ignore comment-only lines when finding entries", () => {
+  const { dir, configPath } = project(`project:
+  name: "Demo"
+
+fx:
+  features:
+      # indented deeper than the entries below
+    tests: false
+`);
+  try {
+    enableFeature({ configPath, configDir: dir, name: "tests" });
+    const text = fs.readFileSync(configPath, "utf8");
+    assert.equal((text.match(/^\s*tests:/gm) ?? []).length, 1);
+    assert.equal(parseConfig(text).fx.tests.enabled, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("migration leaves core-named top-level feature entries in place", () => {
+  const { dir, configPath } = project(`project:
+  name: "Demo"
+
+fx:
+  tests: true
+
+features:
+  tests: ./extensions/tests.js
+  temporaryvariables: ./extensions/fx-tempvars.js
+`);
+  try {
+    const before = parseConfig(fs.readFileSync(configPath, "utf8"));
+    const result = migrateFeatureConfig({ configPath });
+    assert.deepEqual(result.conflicts, ["tests"]);
+    const text = fs.readFileSync(configPath, "utf8");
+    assert.match(text, /^features:\n {2}tests: \.\/extensions\/tests\.js/m);
+    assert.doesNotMatch(text, /^ {2}temporaryvariables:/m);
+    const after = parseConfig(text);
+    assert.deepEqual(after.fx.tests, before.fx.tests);
+    assert.deepEqual(after.features, before.features);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("migration reports a lone core-named legacy entry without changes", () => {
+  const { dir, configPath } = project(`project:
+  name: "Demo"
+
+features:
+  tests: ./extensions/tests.js
+`);
+  try {
+    const original = fs.readFileSync(configPath, "utf8");
+    const result = migrateFeatureConfig({ configPath });
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.migrated, []);
+    assert.deepEqual(result.conflicts, ["tests"]);
+    assert.equal(fs.readFileSync(configPath, "utf8"), original);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an explicit fx.features false drops a matching legacy feature", () => {
+  const { features } = parseConfig(`
+features:
+  temporaryvariables: ./extensions/custom-tempvars.js
+fx:
+  features:
+    temporaryvariables: false
+`);
+  assert.deepEqual(features, []);
+});
+
 test("fx feature migrate reports a no-op when there is nothing legacy", () => {
   const { dir } = project();
   try {

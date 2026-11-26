@@ -637,11 +637,25 @@ export function featureEntriesFromSettings(
 }
 
 /**
- * Merge extension entries, with `override` (the new key) winning over `base`
- * (the legacy top-level `features:` list).
+ * Names that `fx.features` explicitly switches off. A matching legacy entry is
+ * dropped, so the effective feature list never contains a disabled feature.
  */
-export function mergeFeatureEntries(base = [], override = []) {
-  const merged = base.map((entry) => ({ ...entry }));
+export function disabledFeatureNames(settings = {}) {
+  return Object.entries(settings || {})
+    .filter(([, value]) => !isFeatureOn(value))
+    .map(([name]) => name);
+}
+
+/**
+ * Merge extension entries, with `override` (the new key) winning over `base`
+ * (the legacy top-level `features:` list). Names in `disabled` are removed
+ * from `base` entirely, so an explicit `false` still wins.
+ */
+export function mergeFeatureEntries(base = [], override = [], disabled = []) {
+  const off = new Set(disabled.map(String));
+  const merged = base
+    .filter((entry) => !off.has(entry.name))
+    .map((entry) => ({ ...entry }));
   for (const entry of override) {
     const index = merged.findIndex(
       (candidate) => candidate.name === entry.name,
@@ -722,6 +736,7 @@ export function parseConfig(text) {
     features: mergeFeatureEntries(
       normalizeFeatures(raw.features || {}),
       featureEntriesFromSettings(fx.features, fx.vendorDir),
+      disabledFeatureNames(fx.features),
     ),
     vendorDir: fx.vendorDir,
     raw,

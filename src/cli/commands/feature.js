@@ -83,9 +83,18 @@ top-level features: settings under fx.features.`,
         configPath,
         dryRun: Boolean(options.dryRun),
       });
+      for (const name of result.conflicts)
+        reporter.warn(
+          `Left top-level features.${name} in place: ${name} is a core feature, so it cannot move under fx.features.`,
+        );
       if (!result.changed) {
         reporter.info("No legacy feature settings to migrate");
-        return { action: "migrate", migrated: [], changed: false };
+        return {
+          action: "migrate",
+          migrated: [],
+          conflicts: result.conflicts,
+          changed: false,
+        };
       }
       reporter.text(result.diff);
       if (options.dryRun) reporter.info("Dry run: fx.yml would be migrated");
@@ -98,6 +107,7 @@ top-level features: settings under fx.features.`,
       return {
         action: "migrate",
         migrated: result.migrated,
+        conflicts: result.conflicts,
         changed: true,
         dryRun: Boolean(options.dryRun),
       };

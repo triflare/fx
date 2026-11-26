@@ -55,8 +55,12 @@ function childKey(lines, start, end, key) {
 
 function childIndent(lines, start, end) {
   const limit = Math.min(end, lines.length);
+  // Comments can be indented differently from the entries they document, so
+  // only real content decides where direct children start.
   for (let index = start + 1; index < limit; index++) {
-    const match = /^([ \t]+)\S/.exec(content(lines[index]));
+    const text = content(lines[index]);
+    if (text.trim() === "" || /^[ \t]*#/.test(text)) continue;
+    const match = /^([ \t]+)\S/.exec(text);
     if (match) return match[1];
   }
   return "  ";
