@@ -778,7 +778,10 @@ export async function updateVendor({
     let after;
     let extra = {};
     let source = entry.source;
-    let marketplace = lockEntry?.marketplace ?? null;
+    let marketplace =
+      entry.source === lockEntry?.source
+        ? (lockEntry?.marketplace ?? null)
+        : null;
     if (resolved) {
       after = resolved.buffer;
       extra = { etag: resolved.etag, lastModified: resolved.lastModified };
@@ -853,7 +856,7 @@ export async function updateVendor({
       for (const item of configChanges)
         addVendorEntry(configPath, item.entry.name, item.source, {
           unsandboxed: item.entry.unsandboxed,
-          volatile: item.entry.volatile || undefined,
+          volatile: item.entry.volatile,
         });
       for (const item of pending)
         lock.extensions[item.entry.name] = lockEntryForInstall(
@@ -1026,6 +1029,7 @@ export async function outdatedVendor({
           file,
           status:
             sameVersion &&
+            entry.source === lockEntry?.source &&
             lockEntry?.source === resolved.downloadUrl &&
             lockEntry?.sha256 === resolved.sha256
               ? "current"

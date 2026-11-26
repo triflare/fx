@@ -471,6 +471,74 @@ test("vendor update CLI re-resolves a marketplace dist-tag", async () => {
   }
 });
 
+test("vendor update follows a changed source instead of the stale Marketplace pin", async () => {
+  const dir = tmp();
+  const configPath = path.join(dir, "fx.yml");
+  write(configPath, 'project:\n  name: "Marketplace"\n');
+  write(path.join(dir, "stage.tfx"), "stage {\n}\n");
+  const v1 = SIGNALS;
+  const mirror = `${SIGNALS}\n// mirror\n`;
+  const mirrorUrl = "https://mirror.test/signals.js";
+  const reporter = { info() {}, success() {}, warn() {} };
+  const messages = [];
+  const cliReporter = {
+    info: (message) => messages.push(message),
+    success: (message) => messages.push(message),
+    text: (message) => messages.push(message),
+    item() {},
+    warn() {},
+  };
+  const fetchImpl = async (url) => {
+    if (String(url).startsWith(mirrorUrl))
+      return binaryResponse(Buffer.from(mirror));
+    return marketplaceFetch("1.0.0", v1)(url);
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    await addVendor({
+      source: "marketplace:@handle/signals",
+      options: {},
+      cwd: dir,
+      reporter,
+      product: { command: "fx" },
+      fetchImpl: marketplaceFetch("1.0.0", v1),
+    });
+    write(
+      configPath,
+      `project:\n  name: "Marketplace"\nvendor:\n  signals: ${mirrorUrl}\n`,
+    );
+    globalThis.fetch = fetchImpl;
+    const checked = await vendorOutdatedCommand.run({
+      cwd: dir,
+      reporter: cliReporter,
+      product: { command: "fx" },
+    });
+    assert.equal(checked.data[0].status, "outdated");
+    const result = await vendorUpdateCommand.run({
+      args: [],
+      options: {},
+      cwd: dir,
+      reporter: cliReporter,
+      product: { command: "fx" },
+    });
+    assert.equal(result.updated, 1);
+    assert.match(
+      fs.readFileSync(configPath, "utf8"),
+      /mirror\.test\/signals\.js/,
+    );
+    const lock = readLock(dir);
+    assert.equal(lock.extensions.signals.source, mirrorUrl);
+    assert.equal(lock.extensions.signals.marketplace, null);
+    assert.deepEqual(
+      fs.readFileSync(path.join(dir, "extensions", "signals.js")),
+      Buffer.from(mirror),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("parses vendor entries in load order with shorthand and options", () => {
   const config = parseConfig(`
 vendorDir: deps/extensions

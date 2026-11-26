@@ -25,9 +25,9 @@ Extensions hosted on [Triflare Marketplace](https://marketplace.sdisk.us/) can b
 installed by package name, with an optional version or dist-tag:
 
 ```bash
-fx vendor add marketplace:@handle/my-extension
-fx vendor add marketplace:@handle/my-extension@1.2.3
-fx vendor add marketplace:@handle/my-extension@beta
+fx vendor add marketplace:@handle/extension
+fx vendor add marketplace:@handle/extension@1.2.3
+fx vendor add marketplace:@handle/extension@beta
 ```
 
 The command pins the resolved release in `fx.yml` and `fx.lock`, so later builds

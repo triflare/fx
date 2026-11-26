@@ -30,7 +30,7 @@ recorded in fx.lock. Use --dry-run to preview without writing.`,
       write: !options.dryRun,
       resolveEntry: async (entry, lockEntry) => {
         const marketplace = lockEntry?.marketplace;
-        if (!marketplace) return null;
+        if (!marketplace || entry.source !== lockEntry.source) return null;
         return resolveMarketplaceExtension({
           source: `marketplace:${marketplace.package}@${marketplace.ref}`,
         });
