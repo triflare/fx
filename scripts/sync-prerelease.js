@@ -51,7 +51,9 @@ if (!branch || !PRERELEASE_BRANCHES.has(branch)) {
 }
 
 function git(args, options = {}) {
-  return execFileSync("git", args, {
+  // CI checkouts have no committed identity, and `git merge` refuses to create
+  // its commit without one, so every command runs with the release bot's.
+  return execFileSync("git", [...IDENTITY, ...args], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     ...options,
@@ -285,7 +287,7 @@ try {
 } catch (error) {
   if (!mergeInProgress()) throw error;
   resolveRegeneratedConflicts();
-  git([...IDENTITY, "commit", "--no-edit"], { stdio: "inherit" });
+  git(["commit", "--no-edit"], { stdio: "inherit" });
 }
 
 if (fs.existsSync(".gitmodules")) {
