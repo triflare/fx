@@ -1,3 +1,9 @@
+## [2.3.0-alpha.3](https://github.com/triflare/fx/compare/v2.3.0-alpha.2...v2.3.0-alpha.3) (2026-11-26)
+
+### Features
+
+- **vendoring:** add support for Triflare Marketplace extensions ([#44](https://github.com/triflare/fx/issues/44)) ([c8ff886](https://github.com/triflare/fx/commit/c8ff886a66c2f263a8ed1f3c24c41c65d14b5101)), closes [#43](https://github.com/triflare/fx/issues/43)
+
 ## [2.3.0-alpha.2](https://github.com/triflare/fx/compare/v2.3.0-alpha.1...v2.3.0-alpha.2) (2026-11-26)
 
 ### Features
