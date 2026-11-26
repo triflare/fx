@@ -1,88 +1,45 @@
 /**
- * Built-in, project-local features.
+ * Optional feature management.
  *
- * `fx feature <name> enable` copies a feature's extension source into the
- * project and records that file under `features:` in `fx.yml`. Builds load the
- * committed file, so an Fx upgrade never changes a project's feature code, and
- * the project keeps working offline (and in Fx versions that predate the
- * feature system) because the extension is an ordinary JavaScript file.
+ * Every feature is described by `./feature-registry.js` and switched under the
+ * single `fx.features` key. Enabling an extension-backed feature copies its
+ * source into the project and records that file under `fx.features`, so an Fx
+ * upgrade never changes a project's feature code and the project keeps working
+ * offline. Core features (tests, run, partial sprites) are built into Fx and
+ * only record their switch.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseConfig } from "./config.js";
 import {
-  addFeatureEntry,
-  readFxValue,
+  readFeatureSetting,
+  readTopLevelFeatureEntries,
   removeFeatureEntry,
-  setFxScalar,
+  removeFeatureSetting,
+  removeFxKey,
+  removeTopLevelKey,
+  setFeatureSetting,
 } from "./config-edit.js";
+import {
+  CORE_FEATURES,
+  FEATURES,
+  FeatureError,
+  coreFeatureNames,
+  featureNames,
+  getFeature,
+} from "./feature-registry.js";
 import { loadExtensions } from "./extensions.js";
 import { formatDiff } from "./vendor.js";
 
-export class FeatureError extends Error {
-  constructor(message, options) {
-    super(message, options);
-    this.name = "FeatureError";
-  }
-}
-
-/**
- * Feature registry. `source` points at the fork that ships with Fx; `enable`
- * copies it into the project so the project owns (and pins) the bytes.
- */
-export const FEATURES = {
-  temporaryvariables: {
-    name: "temporaryvariables",
-    title: "Temporary Variables",
-    summary: "Disposable per-thread and per-run variables.",
-    extensionId: "fxTempVars",
-    filename: "fx-tempvars.js",
-    source: fileURLToPath(
-      new URL("../vendor/tempvars/fx-tempvars.js", import.meta.url),
-    ),
-  },
+export {
+  CORE_FEATURES,
+  FEATURES,
+  FeatureError,
+  coreFeatureNames,
+  featureNames,
+  getFeature,
 };
-
-/**
- * Built-in language features. They live behind a single `fx.<name>` setting,
- * so they are enabled and disabled without touching `features:`. A core
- * feature may still ship an extension; Fx loads that bundled source itself
- * instead of copying it into the project.
- */
-export const CORE_FEATURES = {
-  tests: {
-    name: "tests",
-    title: "Testing",
-    summary: "Write project tests and run them with `fx test`.",
-    core: true,
-    command: "test",
-  },
-  run: {
-    name: "run",
-    title: "Running",
-    summary: "Run headless entry points with `fx run`.",
-    core: true,
-    command: "run",
-  },
-};
-
-/** List feature names for help and error messages. */
-export function featureNames() {
-  return [...Object.keys(FEATURES), ...Object.keys(CORE_FEATURES)].sort();
-}
-
-/** Resolve one feature by name. */
-export function getFeature(name) {
-  const key = String(name ?? "");
-  const feature = FEATURES[key] ?? CORE_FEATURES[key];
-  if (!feature)
-    throw new FeatureError(
-      `Unknown feature ${JSON.stringify(key)}. Available features: ${featureNames().join(", ")}.`,
-    );
-  return feature;
-}
 
 /** Absolute path of the extension source Fx ships for a feature. */
 export function featureSourcePath(name) {
@@ -169,9 +126,45 @@ function writeFileAtomic(file, data) {
   }
 }
 
-/** Read the `features:` list from a config file. */
-function readFeatureEntries(configPath) {
-  return parseConfig(fs.readFileSync(configPath, "utf8")).features;
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Read a config file, or null when the project has none yet. */
+function readConfig(configPath) {
+  if (!configPath || !fs.existsSync(configPath)) return null;
+  return parseConfig(fs.readFileSync(configPath, "utf8"));
+}
+
+/** The effective extension entry for a feature, if it is enabled. */
+function featureEntry(configPath, feature) {
+  if (feature.core) return null;
+  const loaded = readConfig(configPath);
+  return loaded?.features.find((entry) => entry.name === feature.name) ?? null;
+}
+
+/**
+ * The value to write when re-enabling a core feature. A value from either the
+ * new key or the legacy `fx.<name>` setting keeps its options, so disabling and
+ * enabling again does not reset a pattern, timeout, or seed.
+ */
+function retainedCoreValue(configPath, feature) {
+  const own = readFeatureSetting(configPath, feature.name);
+  if (isPlainObject(own)) return { ...own, enabled: true };
+  const loaded = readConfig(configPath);
+  const legacy = loaded?.raw?.fx?.[feature.name];
+  if (isPlainObject(legacy)) return { ...legacy, enabled: true };
+  return true;
+}
+
+/** The value to write when disabling a core feature, keeping its options. */
+function disabledCoreValue(configPath, feature) {
+  const own = readFeatureSetting(configPath, feature.name);
+  if (isPlainObject(own)) return { ...own, enabled: false };
+  const loaded = readConfig(configPath);
+  const legacy = loaded?.raw?.fx?.[feature.name];
+  if (isPlainObject(legacy)) return { ...legacy, enabled: false };
+  return false;
 }
 
 /**
@@ -186,30 +179,27 @@ function readFeatureEntries(configPath) {
  * @param {boolean} [options.force] replace a modified copy
  * @returns {{feature: object, name: string, file: string, path: string, changed: boolean, configChanged: boolean}}
  */
-/** True when a feature's setting is enabled in the project config. */
-function coreFeatureEnabled(configPath, feature) {
-  if (!configPath || !fs.existsSync(configPath)) return false;
-  return Boolean(readFxValue(configPath, feature.name));
-}
-
 /**
  * Whether a feature is currently enabled in a project.
- * @param {{configPath?: string, name: string}} options
+ *
+ * `fx.features` is the canonical switch; the older `fx.<name>` setting and
+ * top-level `features:` entries stay readable, with the new key winning.
+ *
+ * @param {{configPath?: string, config?: object, name: string}} options
  */
-export function featureEnabled({ configPath, name } = {}) {
+export function featureEnabled({ configPath, config, name } = {}) {
   const feature = getFeature(name);
-  if (feature.core) return coreFeatureEnabled(configPath, feature);
-  if (!configPath || !fs.existsSync(configPath)) return false;
-  return Boolean(
-    readFeatureEntries(configPath).find((entry) => entry.name === feature.name),
-  );
+  const loaded = config ?? readConfig(configPath);
+  if (!loaded) return false;
+  if (feature.core) return Boolean(loaded.fx?.[feature.name]);
+  return Boolean(loaded.features?.find((entry) => entry.name === feature.name));
 }
 
 /**
  * Enable a feature in a project.
  *
  * Extension features copy their source into the project; core features only
- * record `fx.<name>: true` in `fx.yml`.
+ * record `fx.features.<name>: true` in `fx.yml`.
  *
  * @param {object} options
  * @param {string} options.configPath
@@ -228,15 +218,27 @@ export function enableFeature({
 } = {}) {
   const feature = getFeature(name);
   if (feature.core) {
-    const changed = !coreFeatureEnabled(configPath, feature);
-    if (changed) setFxScalar(configPath, feature.name, true);
+    if (featureEnabled({ configPath, name: feature.name }))
+      return {
+        feature,
+        name: feature.name,
+        file: null,
+        path: null,
+        changed: false,
+        configChanged: false,
+      };
+    setFeatureSetting(
+      configPath,
+      feature.name,
+      retainedCoreValue(configPath, feature),
+    );
     return {
       feature,
       name: feature.name,
       file: null,
       path: null,
-      changed,
-      configChanged: changed,
+      changed: true,
+      configChanged: true,
     };
   }
   const dir = assertInside(
@@ -261,18 +263,29 @@ export function enableFeature({
     writeFileAtomic(target, source);
   }
   const file = relativeProjectPath(configDir, target);
-  const configured = readFeatureEntries(configPath).find(
-    (entry) => entry.name === feature.name,
-  );
-  const needsEntry = !configured || configured.file !== file;
-  if (needsEntry) addFeatureEntry(configPath, feature.name, file);
+  const own = readFeatureSetting(configPath, feature.name);
+  let configChanged = false;
+  if (own !== file) {
+    setFeatureSetting(configPath, feature.name, file);
+    configChanged = true;
+  }
+  // Enabling an older project moves its entry under `fx.features`, so a
+  // project ends up with the canonical key once it is written to.
+  if (
+    readTopLevelFeatureEntries(configPath).some(
+      (entry) => entry.name === feature.name,
+    )
+  ) {
+    removeFeatureEntry(configPath, feature.name);
+    configChanged = true;
+  }
   return {
     feature,
     name: feature.name,
     file,
     path: target,
     changed,
-    configChanged: needsEntry,
+    configChanged,
   };
 }
 
@@ -281,12 +294,12 @@ export function enableFeature({
  *
  * A file is deleted only when its name and bytes match the packaged feature
  * source that `enable`/`update` write. A hand-pointed or edited project file is
- * user-owned and survives, even though its `features:` entry is removed.
+ * user-owned and survives, even though its config entry is removed.
  */
 export function disableFeature({ configPath, configDir, name } = {}) {
   const feature = getFeature(name);
   if (feature.core) {
-    if (!coreFeatureEnabled(configPath, feature))
+    if (!featureEnabled({ configPath, name: feature.name }))
       return {
         feature,
         name: feature.name,
@@ -294,21 +307,20 @@ export function disableFeature({ configPath, configDir, name } = {}) {
         changed: false,
         warning: null,
       };
-    setFxScalar(configPath, feature.name, false);
+    setFeatureSetting(
+      configPath,
+      feature.name,
+      disabledCoreValue(configPath, feature),
+    );
     return {
       feature,
       name: feature.name,
       file: null,
       changed: true,
-      warning:
-        feature.name === "tests"
-          ? `${feature.title} will become a core feature in a future version.`
-          : null,
+      warning: null,
     };
   }
-  const entry = readFeatureEntries(configPath).find(
-    (candidate) => candidate.name === feature.name,
-  );
+  const entry = featureEntry(configPath, feature);
   if (!entry)
     throw new FeatureError(
       `${feature.title} is not enabled. Run "fx feature ${feature.name} enable" first.`,
@@ -331,6 +343,7 @@ export function disableFeature({ configPath, configDir, name } = {}) {
       installedByFx = false;
     }
   }
+  removeFeatureSetting(configPath, feature.name);
   removeFeatureEntry(configPath, feature.name);
   if (installedByFx) fs.rmSync(target, { force: true });
   return {
@@ -357,9 +370,7 @@ export function updateFeature({
     throw new FeatureError(
       `${feature.title} is built into Fx, so there is no vendored source or lock entry to update.`,
     );
-  const entry = readFeatureEntries(configPath).find(
-    (candidate) => candidate.name === feature.name,
-  );
+  const entry = featureEntry(configPath, feature);
   if (!entry)
     throw new FeatureError(
       `${feature.title} is not enabled. Run "fx feature ${feature.name} enable" first.`,
@@ -466,4 +477,77 @@ export async function loadFeatureExtensions({ configDir, config } = {}) {
   }
 
   return { catalog, extensionUrls, warnings, ids, unsandboxed };
+}
+
+/**
+ * Move legacy feature settings under the single `fx.features` key.
+ *
+ * Legacy sources are `fx.tests`, `fx.run`, `fx.partialSprites`, and the
+ * top-level `features:` mapping. A value already present under `fx.features`
+ * wins; the legacy copy is removed either way. The config is backed up before
+ * it is changed.
+ *
+ * @param {{configPath: string, dryRun?: boolean}} options
+ * @returns {{migrated: string[], changed: boolean, backup: string|null, diff: string, configPath: string}}
+ */
+export function migrateFeatureConfig({ configPath, dryRun = false } = {}) {
+  const original = fs.readFileSync(configPath, "utf8");
+  const loaded = parseConfig(original);
+  const rawFx = isPlainObject(loaded.raw?.fx) ? loaded.raw.fx : {};
+  const legacyEntries = readTopLevelFeatureEntries(configPath);
+
+  const declared = new Set();
+  const moves = {};
+  for (const name of coreFeatureNames()) {
+    if (!Object.hasOwn(rawFx, name)) continue;
+    declared.add(name);
+    if (readFeatureSetting(configPath, name) === undefined)
+      moves[name] = rawFx[name];
+  }
+  for (const entry of legacyEntries) {
+    declared.add(entry.name);
+    if (readFeatureSetting(configPath, entry.name) === undefined)
+      moves[entry.name] = entry.file;
+  }
+
+  if (declared.size === 0)
+    return {
+      migrated: [],
+      changed: false,
+      backup: null,
+      diff: "",
+      configPath,
+    };
+
+  const dir = path.dirname(configPath);
+  const temp = path.join(
+    dir,
+    `.fx-migrate-${process.pid}-${crypto.randomBytes(4).toString("hex")}.yml`,
+  );
+  const target = dryRun ? temp : configPath;
+  if (dryRun) fs.writeFileSync(temp, original);
+
+  const backup = dryRun ? null : `${configPath}.bak`;
+  if (backup) fs.writeFileSync(backup, original);
+  try {
+    for (const [name, value] of Object.entries(moves))
+      setFeatureSetting(target, name, value);
+    for (const name of coreFeatureNames())
+      if (Object.hasOwn(rawFx, name)) removeFxKey(target, name);
+    if (legacyEntries.length > 0) removeTopLevelKey(target, "features");
+
+    const updated = fs.readFileSync(target, "utf8");
+    return {
+      migrated: [...declared],
+      changed: true,
+      backup,
+      diff: formatDiff(original, updated, path.basename(configPath)),
+      configPath,
+    };
+  } catch (error) {
+    if (!dryRun) fs.writeFileSync(configPath, original);
+    throw error;
+  } finally {
+    if (dryRun) fs.rmSync(temp, { force: true });
+  }
 }

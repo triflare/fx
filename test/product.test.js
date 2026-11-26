@@ -95,7 +95,7 @@ test("init uses the filenames and extension from product.yml", () => {
     );
     assert.match(
       fs.readFileSync(path.join(dir, "fx.yml"), "utf8"),
-      /^fx:\n {2}partialSprites: false$/m,
+      /^fx:\n {2}features:\n {4}partialSprites: false$/m,
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

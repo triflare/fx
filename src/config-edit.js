@@ -751,6 +751,342 @@ export function setFxScalar(configPath, key, value) {
   return { changed: true };
 }
 
+/** True for a non-array object. */
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Read the raw `fx.features` mapping without normalising anything else. */
+export function readFeatureSettings(configPath) {
+  const raw = yaml.load(fs.readFileSync(configPath, "utf8")) ?? {};
+  if (!isPlainObject(raw) || !isPlainObject(raw.fx)) return {};
+  return isPlainObject(raw.fx.features) ? raw.fx.features : {};
+}
+
+/** Read one raw `fx.features.<name>` value. */
+export function readFeatureSetting(configPath, name) {
+  return readFeatureSettings(configPath)[String(name)];
+}
+
+/** Read entries from the legacy top-level `features:` mapping. */
+export function readTopLevelFeatureEntries(configPath) {
+  const raw = yaml.load(fs.readFileSync(configPath, "utf8")) ?? {};
+  if (!isPlainObject(raw) || !isPlainObject(raw.features)) return [];
+  return Object.entries(raw.features)
+    .map(([name, value]) => ({
+      name,
+      file:
+        typeof value === "string"
+          ? value
+          : isPlainObject(value) && typeof value.file === "string"
+            ? value.file
+            : null,
+    }))
+    .filter((entry) => entry.file);
+}
+
+/** Serialize one feature value as YAML lines at `indent`. */
+function featureValueLines(name, value, indent, eol) {
+  const head = `${indent}${quoteKey(name)}:`;
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    const scalar = typeof value === "string" ? quote(value) : String(value);
+    return [`${head} ${scalar}${eol}`];
+  }
+  const dumped = yaml
+    .dump(value, { lineWidth: -1, noRefs: true })
+    .trimEnd()
+    .split("\n");
+  return [`${head}${eol}`, ...dumped.map((line) => `${indent}  ${line}${eol}`)];
+}
+
+/** Replace an inline flow mapping on `prefix` with a block mapping. */
+function expandFlowMapping(
+  lines,
+  index,
+  indent,
+  prefix,
+  mapping,
+  comment,
+  eol,
+) {
+  const dumped = yaml
+    .dump({ [prefix]: mapping }, { lineWidth: -1, noRefs: true })
+    .split("\n")
+    .filter((line, i, all) => !(i === all.length - 1 && line === ""));
+  if (comment) dumped[0] = `${prefix}: ${comment}`;
+  replaceRange(
+    lines,
+    index,
+    index + 1,
+    dumped.map((line) => `${indent}${line}${eol}`),
+  );
+}
+
+/**
+ * Set `fx.features.<name>` without reformatting the rest of fx.yml.
+ *
+ * @param {string} configPath
+ * @param {string} name
+ * @param {unknown} value
+ * @returns {{changed: boolean}}
+ */
+export function setFeatureSetting(configPath, name, value) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const key = String(name);
+  const fx = topLevel(lines, "fx");
+
+  if (!fx) {
+    if (lines.length > 0 && !lines[lines.length - 1].endsWith("\n"))
+      lines[lines.length - 1] += eol;
+    lines.push(
+      `fx:${eol}`,
+      `  features:${eol}`,
+      ...featureValueLines(key, value, "    ", eol),
+    );
+    writeDocument(configPath, lines.join(""));
+    return { changed: true };
+  }
+
+  const { value: fxRest, comment: fxComment } = splitComment(fx.rest);
+  if (fxRest !== "") {
+    if (!fxRest.startsWith("{") || !fxRest.endsWith("}"))
+      throw new Error("fx must be a block mapping to edit it");
+    const mapping = parseValue(fxRest);
+    if (!isPlainObject(mapping))
+      throw new Error("fx must be a mapping to edit it");
+    const features = isPlainObject(mapping.features) ? mapping.features : {};
+    features[key] = value;
+    mapping.features = features;
+    expandFlowMapping(lines, fx.index, "", "fx", mapping, fxComment, eol);
+    writeDocument(configPath, lines.join(""));
+    return { changed: true };
+  }
+
+  const fxEnd = sectionEnd(lines, fx.index);
+  const featuresSpan = mappingEntrySpans(lines, fx.index, fxEnd).find(
+    (span) => span.key === "features",
+  );
+
+  if (!featuresSpan) {
+    const indent = childIndent(lines, fx.index, fxEnd);
+    insertAt(
+      lines,
+      fxEnd,
+      [
+        `${indent}features:${eol}`,
+        ...featureValueLines(key, value, `${indent}  `, eol),
+      ],
+      eol,
+    );
+    writeDocument(configPath, lines.join(""));
+    return { changed: true };
+  }
+
+  const { value: rest, comment } = splitComment(featuresSpan.rest);
+  if (rest !== "") {
+    if (!rest.startsWith("{") || !rest.endsWith("}"))
+      throw new Error("fx.features must be a block mapping to edit it");
+    const mapping = parseValue(rest);
+    if (!isPlainObject(mapping))
+      throw new Error("fx.features must be a mapping to edit it");
+    mapping[key] = value;
+    expandFlowMapping(
+      lines,
+      featuresSpan.index,
+      featuresSpan.indent,
+      "features",
+      mapping,
+      comment,
+      eol,
+    );
+    writeDocument(configPath, lines.join(""));
+    return { changed: true };
+  }
+
+  const childSpans = mappingEntrySpans(
+    lines,
+    featuresSpan.index,
+    featuresSpan.end,
+  );
+  const existing = childSpans.find((span) => span.key === key);
+  if (existing) {
+    let end = existing.end;
+    while (
+      end > existing.index + 1 &&
+      /^(?:[ \t]*#.*|[ \t]*)$/.test(content(lines[end - 1]))
+    )
+      end--;
+    replaceRange(
+      lines,
+      existing.index,
+      end,
+      featureValueLines(key, value, existing.indent, eol),
+    );
+  } else {
+    const indent = childIndent(lines, featuresSpan.index, featuresSpan.end);
+    insertAt(
+      lines,
+      featuresSpan.end,
+      featureValueLines(key, value, indent, eol),
+      eol,
+    );
+  }
+  writeDocument(configPath, lines.join(""));
+  return { changed: true };
+}
+
+/**
+ * Remove `fx.features.<name>` while keeping the rest of the file intact.
+ * @returns {{removed: unknown}}
+ */
+export function removeFeatureSetting(configPath, name) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const key = String(name);
+  const removedValue = readFeatureSetting(configPath, key);
+  const fx = topLevel(lines, "fx");
+  if (!fx) return { removed: undefined };
+
+  const { value: fxRest } = splitComment(fx.rest);
+  if (fxRest !== "") {
+    if (!fxRest.startsWith("{") || !fxRest.endsWith("}"))
+      throw new Error("fx must be a block mapping to edit it");
+    const mapping = parseValue(fxRest);
+    if (!isPlainObject(mapping) || !isPlainObject(mapping.features))
+      return { removed: undefined };
+    if (!Object.hasOwn(mapping.features, key)) return { removed: undefined };
+    delete mapping.features[key];
+    const dumped = yaml
+      .dump({ fx: mapping }, { lineWidth: -1, noRefs: true })
+      .split("\n")
+      .filter((line, i, all) => !(i === all.length - 1 && line === ""));
+    replaceRange(
+      lines,
+      fx.index,
+      fx.index + 1,
+      dumped.map((line) => `${line}${eol}`),
+    );
+    writeDocument(configPath, lines.join(""));
+    return { removed: removedValue };
+  }
+
+  const fxEnd = sectionEnd(lines, fx.index);
+  const featuresSpan = mappingEntrySpans(lines, fx.index, fxEnd).find(
+    (span) => span.key === "features",
+  );
+  if (!featuresSpan) return { removed: undefined };
+
+  const { value: rest, comment } = splitComment(featuresSpan.rest);
+  if (rest !== "") {
+    if (!rest.startsWith("{") || !rest.endsWith("}"))
+      return { removed: undefined };
+    const mapping = parseValue(rest);
+    if (!isPlainObject(mapping) || !Object.hasOwn(mapping, key))
+      return { removed: undefined };
+    delete mapping[key];
+    if (Object.keys(mapping).length === 0)
+      replaceRange(lines, featuresSpan.index, featuresSpan.index + 1, [
+        `${featuresSpan.indent}features: {}${comment ? ` ${comment}` : ""}${eol}`,
+      ]);
+    else
+      expandFlowMapping(
+        lines,
+        featuresSpan.index,
+        featuresSpan.indent,
+        "features",
+        mapping,
+        comment,
+        eol,
+      );
+    writeDocument(configPath, lines.join(""));
+    return { removed: removedValue };
+  }
+
+  const childSpans = mappingEntrySpans(
+    lines,
+    featuresSpan.index,
+    featuresSpan.end,
+  );
+  const existing = childSpans.find((span) => span.key === key);
+  if (!existing) return { removed: undefined };
+  let removeEnd = existing.end;
+  while (
+    removeEnd > existing.index + 1 &&
+    /^(?:[ \t]*#.*|[ \t]*)$/.test(content(lines[removeEnd - 1]))
+  )
+    removeEnd--;
+  const blockEnd = featuresSpan.end - (removeEnd - existing.index);
+  replaceRange(lines, existing.index, removeEnd, []);
+  const stays = mappingEntrySpans(lines, featuresSpan.index, blockEnd);
+  if (stays.length === 0) {
+    const line = lines[featuresSpan.index];
+    lines[featuresSpan.index] =
+      `${featuresSpan.indent}features: {}` +
+      `${comment ? ` ${comment}` : ""}${ending(line) || eol}`;
+  }
+  writeDocument(configPath, lines.join(""));
+  return { removed: removedValue };
+}
+
+/**
+ * Remove a top-level key and everything indented under it (used by migration).
+ * @returns {boolean} whether something was removed
+ */
+export function removeTopLevelKey(configPath, key) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const bounds = topLevelBounds(lines, String(key));
+  if (!bounds) return false;
+  replaceRange(lines, bounds.index, bounds.end, []);
+  writeDocument(configPath, lines.join(""));
+  return true;
+}
+
+/**
+ * Remove one `fx.<key>` entry (used by migration).
+ * @returns {boolean} whether something was removed
+ */
+export function removeFxKey(configPath, key) {
+  const text = fs.readFileSync(configPath, "utf8");
+  const lines = splitLines(text);
+  const eol = eolOf(text);
+  const fx = topLevel(lines, "fx");
+  if (!fx) return false;
+
+  const { value: rest } = splitComment(fx.rest);
+  if (rest !== "") {
+    if (!rest.startsWith("{") || !rest.endsWith("}")) return false;
+    const mapping = parseValue(rest);
+    if (!isPlainObject(mapping) || !Object.hasOwn(mapping, String(key)))
+      return false;
+    delete mapping[String(key)];
+    const dumped = yaml
+      .dump({ fx: mapping }, { lineWidth: -1, noRefs: true })
+      .split("\n")
+      .filter((line, i, all) => !(i === all.length - 1 && line === ""));
+    replaceRange(
+      lines,
+      fx.index,
+      fx.index + 1,
+      dumped.map((line) => `${line}${eol}`),
+    );
+    writeDocument(configPath, lines.join(""));
+    return true;
+  }
+
+  const fxEnd = sectionEnd(lines, fx.index);
+  const existing = mappingEntrySpans(lines, fx.index, fxEnd).find(
+    (span) => span.key === String(key),
+  );
+  if (!existing) return false;
+  replaceRange(lines, existing.index, existing.end, []);
+  writeDocument(configPath, lines.join(""));
+  return true;
+}
+
 /**
  * Remove a `features:` entry.
  * @param {string} configPath

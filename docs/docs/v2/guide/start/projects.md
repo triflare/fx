@@ -55,7 +55,9 @@ project:
   unsandboxed: []
 
 fx:
-  partialSprites: false
+  features:
+    partialSprites: false
+    temporaryvariables: ./extensions/fx-tempvars.js
   vendorDir: extensions
   lint:
     extends: recommended
@@ -65,9 +67,6 @@ fx:
 vendor:
   signals: https://example.com/signals.js
   mything: ./src/mything.js
-
-features:
-  temporaryvariables: ./extensions/fx-tempvars.js
 
 package:
   target: html
@@ -94,24 +93,24 @@ These settings are stored in the PenguinMod project itself.
 
 These settings only affect how Triflare Fx builds the project. They are never saved into the PenguinMod project.
 
-| Setting          | What it does                                                                            | Default       |
-| ---------------- | --------------------------------------------------------------------------------------- | ------------- |
-| `partialSprites` | Allows `partial sprite "Name" { … }` declarations that merge into a sprite.             | `false`       |
-| `vendorDir`      | The folder that holds vendored extensions. You can also set it at the top level.        | `extensions`  |
-| `lint`           | Lint preset and rule overrides. See [Linting](/guide/workflow/linting#configure-rules). | `recommended` |
+| Setting     | What it does                                                                            | Default       |
+| ----------- | --------------------------------------------------------------------------------------- | ------------- |
+| `features`  | Optional features, keyed by name. See [Project features](/guide/extensions/features).   | `{}`          |
+| `vendorDir` | The folder that holds vendored extensions. You can also set it at the top level.        | `extensions`  |
+| `lint`      | Lint preset and rule overrides. See [Linting](/guide/workflow/linting#configure-rules). | `recommended` |
 
-See [Split a sprite across files](#split-a-sprite-across-files).
+Every optional Fx feature is switched under `fx.features`, including partial sprites, tests, run, and temporary variables. See [Split a sprite across files](#split-a-sprite-across-files).
 
 ### vendor and features
 
-`vendor` declares extensions whose source is committed to the project, and `features` records the extension files installed by `fx feature`.
+`vendor` declares extensions whose source is committed to the project. `fx.features` holds the switches for optional features and any extension files installed by `fx feature`.
 
-| Setting    | What it does                                                               |
-| ---------- | -------------------------------------------------------------------------- |
-| `vendor`   | Extensions to copy into `vendorDir` and verify against `fx.lock`.          |
-| `features` | Extension files installed by `fx feature <name> enable`, keyed by feature. |
+| Setting       | What it does                                                                             |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `vendor`      | Extensions to copy into `vendorDir` and verify against `fx.lock`.                        |
+| `fx.features` | Optional feature switches, plus extension files installed by `fx feature <name> enable`. |
 
-Both are optional. Order under `vendor` is load order. See [Vendoring extensions](/guide/extensions/vendoring) and [Project features](/guide/extensions/features).
+Both are optional. Order under `vendor` is load order. Older projects may still use a top-level `features:` mapping; `fx feature migrate` moves it under `fx.features`. See [Vendoring extensions](/guide/extensions/vendoring) and [Project features](/guide/extensions/features).
 
 ### package
 
@@ -170,8 +169,11 @@ Large sprites can be hard to navigate in one file. Turn on partial sprites in `f
 
 ```yaml
 fx:
-  partialSprites: true
+  features:
+    partialSprites: true
 ```
+
+You can also run `fx feature partialSprites enable`, which writes the same setting.
 
 Then declare the sprite once and add more parts with `partial sprite`:
 
