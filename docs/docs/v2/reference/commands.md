@@ -170,7 +170,7 @@ fx vendor migrate [--yes]
 
 Copies extensions into the vendor directory, records their hashes in `fx.lock`, and loads them from there. See [Vendoring extensions](/guide/extensions/vendoring).
 
-`fx vendor install` also accepts `<source>` for compatibility, but `fx vendor add` is the current form.
+`<source>` may be a URL, a local path, or a Triflare Marketplace package such as `marketplace:@handle/extension@beta`. Marketplace packages resolve to a pinned download URL before they are vendored. `fx vendor install` also accepts `<source>` for compatibility, but `fx vendor add` is the current form.
 
 ### fx feature
 
