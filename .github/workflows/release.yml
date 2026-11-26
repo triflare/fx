@@ -46,6 +46,10 @@ jobs:
           # test matrix stays on 22 and 24; only the release job is bumped.
           node-version: 26
           cache: npm
+      - name: Sync prerelease branch with latest
+        # semantic-release only sees tags reachable from the branch, so merge
+        # the latest stable release back in to version alpha/beta from it.
+        run: node scripts/sync-prerelease.js
       - name: Set up npm
         # `npm stage` (staged publishing) requires npm >= 11.15 and dist-tags
         # over OIDC trusted publishing require >= 11.21; Node 24 bundles 11.16.
