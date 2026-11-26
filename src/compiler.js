@@ -8,6 +8,7 @@
 import { CATALOG, LIST_OPS, extensionForOpcode } from "./catalog.js";
 import { CompileError } from "./errors.js";
 import { configComment } from "./config.js";
+import { COMMENT_HEIGHT, COMMENT_WIDTH, layoutTarget } from "./layout.js";
 import { md5hex, imageSize, wavInfo, detectFormat } from "./sb3.js";
 
 const HAT_ALIASES = {
@@ -84,19 +85,6 @@ class Context {
     this.lists = new Map();
     this.funcs = new Map();
     this.paramScopes = [];
-    this.scriptX = 48;
-    this.scriptY = 48;
-  }
-
-  nextScriptPosition() {
-    const x = this.scriptX;
-    const y = this.scriptY;
-    this.scriptY += 420;
-    if (this.scriptY > 3600) {
-      this.scriptY = 48;
-      this.scriptX += 500;
-    }
-    return { x, y };
   }
 
   resolveValue(name) {
@@ -260,6 +248,13 @@ export class Compiler {
     // stacks are emitted, so blocks whose next-statement connection is dynamic
     // can only be given their mutation once every stack is complete.
     for (const ctx of contexts) this.applyDynamicNextMutations(ctx);
+
+    // Source comments that could not sit on a block become workspace comments.
+    this.emitStandaloneComments(ast, contexts);
+
+    // Pass 4: pack the scripts like the editor's clean up tool. Sizes depend on
+    // the complete block tree, so this has to run after every stack exists.
+    for (const ctx of contexts) layoutTarget(ctx.target, this.catalog);
 
     this.validateRequiredExtensions();
 
@@ -601,7 +596,6 @@ export class Compiler {
     if (!entry || entry.kind !== "hat")
       this.fail(`Unknown event ${JSON.stringify(short)}`, decl.loc);
 
-    const pos = ctx.nextScriptPosition();
     const fields = {};
     const inputs = {};
     const argSpecs = entry.args || [];
@@ -637,9 +631,8 @@ export class Compiler {
       fields,
       inputs,
       topLevel: true,
-      x: pos.x,
-      y: pos.y,
     });
+    this.attachNodeComments(ctx, decl, id);
     // re-parent any inputs that referenced this hat
     this.reparentInputs(ctx, id, inputs);
     const first = this.newStack(ctx, decl.body, id);
@@ -649,15 +642,13 @@ export class Compiler {
 
   emitFunction(ctx, decl) {
     const fn = ctx.funcs.get(decl.name);
-    const pos = ctx.nextScriptPosition();
     const defId = this.addBlock(ctx, {
       opcode: fn.returns
         ? "procedures_definition_return"
         : "procedures_definition",
       topLevel: true,
-      x: pos.x,
-      y: pos.y,
     });
+    this.attachNodeComments(ctx, decl, defId);
 
     const protoId = uid("proto");
     const protoInputs = {};
@@ -702,6 +693,64 @@ export class Compiler {
     const first = this.newStack(ctx, decl.body, defId);
     ctx.paramScopes.pop();
     if (first) ctx.target.blocks[defId].next = first;
+  }
+
+  // ------------------------------------------------------------- comments
+
+  /**
+   * Emit the comments attached to one AST node as a single Scratch block
+   * comment. Scratch links a comment from both ends (`block.comment` and
+   * `comment.blockId`), so both are written here.
+   * @param {Context} ctx
+   * @param {{comments?: string[]}} node
+   * @param {string} blockId
+   */
+  attachNodeComments(ctx, node, blockId) {
+    if (!node.comments || node.comments.length === 0) return;
+    const block = ctx.target.blocks[blockId];
+    if (!block) return;
+    const id = uid("c");
+    block.comment = id;
+    ctx.target.comments[id] = {
+      blockId,
+      // The editor positions attached comments next to their block when both
+      // coordinates are missing (`ScratchBlockComment.autoPosition_`).
+      x: null,
+      y: null,
+      width: COMMENT_WIDTH,
+      height: COMMENT_HEIGHT,
+      minimized: false,
+      text: node.comments.join("\n"),
+    };
+  }
+
+  /**
+   * Add a comment that floats on the target's workspace instead of a block.
+   * @param {Context} ctx
+   * @param {string} text
+   */
+  addWorkspaceComment(ctx, text) {
+    const id = uid("c");
+    ctx.target.comments[id] = {
+      blockId: null,
+      x: null,
+      y: null,
+      width: COMMENT_WIDTH,
+      height: COMMENT_HEIGHT,
+      minimized: false,
+      text,
+    };
+  }
+
+  /** Place standalone comments in the targets they were declared in. */
+  emitStandaloneComments(ast, contexts) {
+    const standalone = ast.standaloneComments || [];
+    if (standalone.length === 0) return;
+    const byName = new Map(contexts.map((ctx) => [ctx.target.name, ctx]));
+    for (const comment of standalone) {
+      const ctx = byName.get(comment.target) || this.stageCtx;
+      this.addWorkspaceComment(ctx, comment.text);
+    }
   }
 
   // --------------------------------------------------------- block utils
@@ -751,6 +800,7 @@ export class Compiler {
       }
       const id = this.compileStatement(ctx, statement);
       if (id == null) continue;
+      this.attachNodeComments(ctx, statement, id);
       if (first == null) {
         first = id;
         ctx.target.blocks[id].parent = parentId;
