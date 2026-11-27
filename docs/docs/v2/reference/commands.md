@@ -137,6 +137,27 @@ Builds the project and serves it at `http://127.0.0.1:3000/`, reloading the page
 
 `fx dev` needs `.tfx` sources. It can't serve a `.pmp` file.
 
+### fx open
+
+```bash
+fx open [<input.tfx>|<dir>] [--host [host]] [--lan] [--port <port>] [--strict-port] [--no-open] [--no-config]
+```
+
+Builds the project, serves the `.pmp` from a local HTTP server, and opens the PenguinMod editor on it through `?project_url=`. Use it to click through a real build in the editor without publishing it anywhere.
+
+| Option          | What it does                                                     |
+| --------------- | ---------------------------------------------------------------- |
+| `--port <port>` | Selects the port. Default is `3000`.                             |
+| `--strict-port` | Fails when the port is taken instead of trying the next one.     |
+| `--lan`         | Listens on all interfaces so another device can open the editor. |
+| `--host [host]` | Listens on a host. With no value, listens on all interfaces.     |
+| `--no-open`     | Prints the editor link without launching a browser.              |
+| `--no-config`   | Ignores `fx.yml` and uses default settings.                      |
+
+The server allows the editor's origin to read the archive through CORS, because the editor downloads the project from its own origin. It serves the build from when it started: restart the command to see changes, and use [`fx dev`](#fx-dev) when you want a reload on save.
+
+Alias: `o`
+
 ### fx decompile
 
 ```bash
@@ -299,6 +320,7 @@ These options work with every command.
 | `blocks` | `catalog`   |
 | `p`      | `package`   |
 | `d`      | `decompile` |
+| `o`      | `open`      |
 | `i`      | `init`      |
 | `format` | `fmt`       |
 

@@ -9,6 +9,7 @@ import { featureCommand } from "./feature.js";
 import { fmtCommand } from "./fmt.js";
 import { initCommand } from "./init.js";
 import { lintCommand } from "./lint.js";
+import { openCommand } from "./open.js";
 import { packageCommand } from "./package.js";
 import { registerSprite } from "./sprite/index.js";
 import { runCommand } from "./run.js";
@@ -19,6 +20,7 @@ import { defineCommand } from "../define-command.js";
 const TOP_LEVEL = [
   buildCommand,
   devCommand,
+  openCommand,
   packageCommand,
   decompileCommand,
   checkCommand,
