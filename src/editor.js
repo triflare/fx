@@ -13,13 +13,39 @@ import { formatDevUrls } from "./dev.js";
 /** Editor page that accepts a `project_url` query parameter. */
 export const PENGUINMOD_EDITOR = "https://studio.penguinmod.com/editor.html";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-  "Access-Control-Allow-Headers": "*",
-  // Chrome asks before a public page may read a loopback address.
-  "Access-Control-Allow-Private-Network": "true",
-};
+/**
+ * CORS headers for the editor origin. Same-origin access (the landing page) is
+ * not subject to CORS, so restricting the header does not affect it.
+ * @param {string} origin
+ * @returns {Record<string, string>}
+ */
+function corsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    // Chrome asks before a public page may read a loopback address.
+    "Access-Control-Allow-Private-Network": "true",
+  };
+}
+
+/**
+ * Origin the visitor used to reach this server, taken from a validated `Host`
+ * header. Returns null when the header is missing or malformed.
+ * @param {import("node:http").IncomingMessage} request
+ * @returns {string | null}
+ */
+function requestOrigin(request) {
+  const host = request.headers.host;
+  if (!host) return null;
+  try {
+    const url = new URL(`http://${host}`);
+    if (url.host.toLowerCase() !== host.toLowerCase()) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Editor link that loads `projectUrl` directly into the editor.
@@ -85,24 +111,41 @@ export async function startEditorServer(options = {}) {
     throw new Error(`Invalid port: ${options.port}`);
   const strictPort = Boolean(options.strictPort);
   const log = options.log || {};
+  const editorBase = options.editorBase
+    ? String(options.editorBase)
+    : PENGUINMOD_EDITOR;
+  const editorOrigin = new URL(editorBase).origin;
+  if (editorOrigin === "null")
+    throw new Error(`Invalid editor base: ${editorBase}`);
+  const cors = corsHeaders(editorOrigin);
 
   let closed = false;
   let currentUrl = null;
   const projectPath = `/${encodeURIComponent(filename)}`;
 
   const server = http.createServer((request, response) => {
-    const url = new URL(request.url || "/", "http://localhost");
+    let url;
+    try {
+      url = new URL(request.url || "/", "http://localhost");
+    } catch {
+      response.writeHead(400, {
+        ...cors,
+        "Content-Type": "text/plain; charset=utf-8",
+      });
+      response.end("Bad request\n");
+      return;
+    }
 
     // Preflight, including Chrome's private-network request.
     if (request.method === "OPTIONS") {
-      response.writeHead(204, CORS_HEADERS);
+      response.writeHead(204, cors);
       response.end();
       return;
     }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405, {
-        ...CORS_HEADERS,
+        ...cors,
         Allow: "GET, HEAD, OPTIONS",
         "Content-Type": "text/plain; charset=utf-8",
       });
@@ -114,7 +157,7 @@ export async function startEditorServer(options = {}) {
 
     if (url.pathname === projectPath) {
       response.writeHead(200, {
-        ...CORS_HEADERS,
+        ...cors,
         "Content-Type": "application/octet-stream",
         "Content-Length": data.length,
         "Cache-Control": "no-store",
@@ -125,29 +168,35 @@ export async function startEditorServer(options = {}) {
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
       response.writeHead(200, {
-        ...CORS_HEADERS,
+        ...cors,
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
       });
+      // Link to the archive on the address the visitor actually reached, so
+      // remote visitors are not sent to their own loopback address.
+      const origin = requestOrigin(request);
+      const projectUrl = origin
+        ? `${origin}${projectPath}`
+        : currentUrl || projectPath;
       response.end(
         head
           ? undefined
           : indexPage({
               filename,
-              link: editorUrl(currentUrl || projectPath, options.editorBase),
+              link: editorUrl(projectUrl, editorBase),
             }),
       );
       return;
     }
 
     if (url.pathname === "/favicon.ico") {
-      response.writeHead(204, CORS_HEADERS);
+      response.writeHead(204, cors);
       response.end();
       return;
     }
 
     response.writeHead(404, {
-      ...CORS_HEADERS,
+      ...cors,
       "Content-Type": "text/plain; charset=utf-8",
     });
     response.end(head ? undefined : `Not found: ${filename}\n`);
@@ -191,7 +240,7 @@ export async function startEditorServer(options = {}) {
     (base) => `${base}${filename}`,
   );
   const editorUrls = projectUrls.map((projectUrl) =>
-    editorUrl(projectUrl, options.editorBase),
+    editorUrl(projectUrl, editorBase),
   );
   currentUrl = projectUrls[0];
 
@@ -210,8 +259,13 @@ export async function startEditorServer(options = {}) {
     async close() {
       if (closed) return;
       closed = true;
-      await new Promise((resolve) => server.close(resolve));
-      server.closeAllConnections?.();
+      const finished = new Promise((resolve) => server.close(resolve));
+      server.closeIdleConnections?.();
+      // Stalled transfers must not hold shutdown open forever.
+      const force = setTimeout(() => server.closeAllConnections?.(), 2000);
+      force.unref?.();
+      await finished;
+      clearTimeout(force);
     },
   };
 }

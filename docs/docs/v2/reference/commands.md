@@ -154,7 +154,7 @@ Builds the project, serves the `.pmp` from a local HTTP server, and opens the Pe
 | `--no-open`     | Prints the editor link without launching a browser.              |
 | `--no-config`   | Ignores `fx.yml` and uses default settings.                      |
 
-The server sends `Access-Control-Allow-Origin: *`, because the editor downloads the project from its own origin. It serves the build from when it started: restart the command to see changes, and use [`fx dev`](#fx-dev) when you want a reload on save.
+The server allows the editor's origin to read the archive through CORS, because the editor downloads the project from its own origin. It serves the build from when it started: restart the command to see changes, and use [`fx dev`](#fx-dev) when you want a reload on save.
 
 Alias: `o`
 
