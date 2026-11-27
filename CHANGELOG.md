@@ -1,3 +1,9 @@
+## [2.3.0-alpha.4](https://github.com/triflare/fx/compare/v2.3.0-alpha.3...v2.3.0-alpha.4) (2026-11-27)
+
+### Features
+
+- **cli:** add `fx open` command to serve builds and launch PenguinMod editor ([#46](https://github.com/triflare/fx/issues/46)) ([4ea01af](https://github.com/triflare/fx/commit/4ea01af53ed02b7d256ca170e7567d819529b91e))
+
 ## [2.3.0-alpha.3](https://github.com/triflare/fx/compare/v2.3.0-alpha.2...v2.3.0-alpha.3) (2026-11-26)
 
 ### Features
